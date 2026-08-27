@@ -110,14 +110,9 @@ if Code.ensure_loaded?(Igniter) do
       case Igniter.Project.Module.module_exists(igniter, root_registry) do
         {true, igniter} ->
           Igniter.Project.Module.find_and_update_module!(igniter, root_registry, fn zipper ->
-            case Igniter.Code.Common.move_to_do_block(zipper) do
-              {:ok, zipper} ->
-                {:ok,
-                 Igniter.Code.Common.add_code(zipper, "register_child #{inspect(bc_registry)}")}
-
-              :error ->
-                {:ok, zipper}
-            end
+            # zipper is already inside the module's do block
+            {:ok,
+             Igniter.Code.Common.add_code(zipper, "register_child #{inspect(bc_registry)}")}
           end)
 
         {false, igniter} ->

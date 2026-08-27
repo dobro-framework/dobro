@@ -487,13 +487,7 @@ if Code.ensure_loaded?(Igniter) do
       case Igniter.Project.Module.module_exists(igniter, api) do
         {true, igniter} ->
           Igniter.Project.Module.find_and_update_module!(igniter, api, fn zipper ->
-            case Igniter.Code.Common.move_to_do_block(zipper) do
-              {:ok, zipper} ->
-                {:ok, Igniter.Code.Common.add_code(zipper, routes)}
-
-              :error ->
-                {:ok, zipper}
-            end
+            {:ok, Igniter.Code.Common.add_code(zipper, routes)}
           end)
 
         {false, igniter} ->
@@ -514,13 +508,7 @@ if Code.ensure_loaded?(Igniter) do
       case Igniter.Project.Module.module_exists(igniter, registry) do
         {true, igniter} ->
           Igniter.Project.Module.find_and_update_module!(igniter, registry, fn zipper ->
-            case Igniter.Code.Common.move_to_do_block(zipper) do
-              {:ok, zipper} ->
-                {:ok, Igniter.Code.Common.add_code(zipper, regs)}
-
-              :error ->
-                {:ok, zipper}
-            end
+            {:ok, Igniter.Code.Common.add_code(zipper, regs)}
           end)
 
         {false, igniter} ->
