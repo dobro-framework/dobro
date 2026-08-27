@@ -64,7 +64,7 @@ if Code.ensure_loaded?(Igniter) do
     defp create_port_api(igniter, port_api) do
       Igniter.Project.Module.create_module(igniter, port_api, """
       @moduledoc false
-      use Dobro.App.Api.Port
+      use Dobro.Spec.Port
       """)
     end
 
