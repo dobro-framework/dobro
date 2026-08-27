@@ -30,12 +30,27 @@ defmodule Dobro.Igniter.Naming do
           bc_module: bc_module,
           bc_parts: bc_parts,
           context_atom: context_atom(bc_parts),
-          table: Macro.underscore(aggregate) <> "s",
+          table: pluralize(Macro.underscore(aggregate)),
           singular: Macro.underscore(aggregate),
+          list_name: Macro.camelize(pluralize(Macro.underscore(aggregate))),
           create_event: Module.concat([bc_module, Domain, Events, :"#{aggregate}Created"]),
           update_event: Module.concat([bc_module, Domain, Events, :"#{aggregate}Updated"]),
           delete_event: Module.concat([bc_module, Domain, Events, :"#{aggregate}Deleted"])
         }
+    end
+  end
+
+  @doc false
+  def pluralize(word) when is_binary(word) do
+    cond do
+      String.ends_with?(word, "y") and not String.ends_with?(word, ~w(ay ey iy oy uy)) ->
+        String.replace_suffix(word, "y", "ies")
+
+      String.ends_with?(word, ["s", "x", "z", "ch", "sh"]) ->
+        word <> "es"
+
+      true ->
+        word <> "s"
     end
   end
 

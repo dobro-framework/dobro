@@ -137,17 +137,13 @@ if Code.ensure_loaded?(Igniter) do
       def delete(%__MODULE__{} = aggregate, %Delete{} = input) do
         aggregate
         |> pipeline(input)
-        |> add_event(Events.#{meta.aggregate_name}Deleted, &with_deleted_at/2)
+        |> add_event(Events.#{meta.aggregate_name}Deleted)
         |> apply_changes()
       end
 
       defapply Events.#{meta.aggregate_name}Created
       defapply Events.#{meta.aggregate_name}Updated
       defapply Events.#{meta.aggregate_name}Deleted
-
-      defp with_deleted_at(event, _aggregate) do
-        %{event | payload: Map.put(event.payload, :deleted_at, DateTime.utc_now())}
-      end
       """)
     end
 
@@ -201,7 +197,10 @@ if Code.ensure_loaded?(Igniter) do
 
     defp create_commands(igniter, meta, fields, tenant?) do
       commands = Module.concat([meta.bc_module, App, :"#{meta.aggregate_name}Commands"])
-      scope = if tenant?, do: "    scope :tenant, from: :payload", else: ""
+      scope_line =
+        if tenant?,
+          do: "    scope :tenant, from: :payload",
+          else: "    scope :global"
 
       input_fields =
         Enum.map_join(fields, "\n", fn {name, type} ->
@@ -234,14 +233,14 @@ if Code.ensure_loaded?(Igniter) do
 
       command Create#{meta.aggregate_name} do
         description "Create a #{meta.singular}."
-      #{scope}
+      #{scope_line}
         payload Create#{meta.aggregate_name}Input
         result Create#{meta.aggregate_name}Result
       end
 
       command Update#{meta.aggregate_name} do
         description "Update a #{meta.singular}."
-      #{scope}
+      #{scope_line}
         identity do
           field :id, :id
         end
@@ -251,7 +250,7 @@ if Code.ensure_loaded?(Igniter) do
 
       command Delete#{meta.aggregate_name} do
         description "Delete a #{meta.singular}."
-      #{scope}
+      #{scope_line}
         identity do
           field :id, :id
         end
@@ -269,7 +268,11 @@ if Code.ensure_loaded?(Igniter) do
     defp create_queries(igniter, meta, fields, tenant?) do
       queries = Module.concat([meta.bc_module, App, :"#{meta.aggregate_name}Queries"])
       port = Module.concat([meta.bc_module, Ports, :"#{meta.aggregate_name}ReadRepo"])
-      scope = if tenant?, do: "    scope :tenant, from: :payload", else: ""
+
+      scope_line =
+        if tenant?,
+          do: "    scope :tenant, from: :payload",
+          else: "    scope :global"
 
       result_fields =
         Enum.map_join(fields, "\n", fn {name, type} ->
@@ -311,7 +314,7 @@ if Code.ensure_loaded?(Igniter) do
 
       query Get#{meta.aggregate_name} do
         description "Fetch a #{meta.singular} by id."
-      #{scope}
+      #{scope_line}
         payload do
       #{tenant_payload}
           field :id, :id, required: true
@@ -319,9 +322,9 @@ if Code.ensure_loaded?(Igniter) do
         result #{meta.aggregate_name}
       end
 
-      query List#{meta.aggregate_name}s do
+      query List#{meta.list_name} do
         description "List #{meta.table}."
-      #{scope}
+      #{scope_line}
         payload do
       #{tenant_payload}
           field :query, Query
@@ -330,8 +333,8 @@ if Code.ensure_loaded?(Igniter) do
       end
 
       query_handler Handler, repo: #{meta.aggregate_name}ReadRepo do
-        handle Get#{meta.aggregate_name}
-        handle List#{meta.aggregate_name}s
+        handle Get#{meta.aggregate_name}, :get_#{meta.singular}
+        handle List#{meta.list_name}, :list_#{meta.table}
       end
       """)
     end
@@ -417,7 +420,7 @@ if Code.ensure_loaded?(Igniter) do
         if tenant? do
           ",\n        tenant_strategy: :schema,\n        scopes: [:tenant]"
         else
-          ",\n        scopes: []"
+          ",\n        scopes: [:global]"
         end
 
       field_list =
@@ -437,7 +440,7 @@ if Code.ensure_loaded?(Igniter) do
         fields [:id, #{field_list}]
       end
 
-      defquery List#{meta.aggregate_name}s, type: :list do
+      defquery List#{meta.list_name}, type: :list do
         fields [:id, #{field_list}]
       end
       """)
@@ -462,8 +465,8 @@ if Code.ensure_loaded?(Igniter) do
         to: #{meta.aggregate_name}Queries.Handler,
         policy: @read
 
-      route :list_#{meta.singular}s,
-        query: #{meta.aggregate_name}Queries.List#{meta.aggregate_name}s,
+      route :list_#{meta.table},
+        query: #{meta.aggregate_name}Queries.List#{meta.list_name},
         to: #{meta.aggregate_name}Queries.Handler,
         policy: @read
 
@@ -522,7 +525,11 @@ if Code.ensure_loaded?(Igniter) do
     defp ecto_type(:id), do: :id
     defp ecto_type(:float), do: :float
     defp ecto_type(:map), do: :map
+    defp ecto_type(:datetime), do: :utc_datetime
     defp ecto_type(:utc_datetime), do: :utc_datetime
+    defp ecto_type(:naive_datetime), do: :naive_datetime
+    defp ecto_type(:date), do: :date
+    defp ecto_type(:time), do: :time
     defp ecto_type(other), do: other
   end
 else

@@ -70,10 +70,12 @@ if Code.ensure_loaded?(Igniter) do
             # api MyApp.Catalog.Products.ProductsApi
           end
 
+          import_types Absinthe.Type.Custom
+          import_types AbsintheErrorPayload.ValidationMessageTypes
           import_types ApiSchema
 
           query do
-            # Placeholder until Dobro APIs are registered; Absinthe requires ≥1 field.
+            # Placeholder until Dobro APIs contribute fields; Absinthe requires ≥1 field.
             field :health, :string do
               resolve(fn _, _ -> {:ok, "ok"} end)
             end

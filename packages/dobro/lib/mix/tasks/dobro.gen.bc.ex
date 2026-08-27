@@ -65,6 +65,9 @@ if Code.ensure_loaded?(Igniter) do
       Igniter.Project.Module.create_module(igniter, port_api, """
       @moduledoc false
       use Dobro.Spec.Port
+
+      # Marker callback so the port is a valid behaviour before routes add real ones.
+      @callback __dobro_api_port__() :: true
       """)
     end
 
@@ -77,6 +80,9 @@ if Code.ensure_loaded?(Igniter) do
         port: #{inspect(port_api)},
         context: {#{inspect(bc_module)}, #{inspect(context_atom)}},
         surfaces: [:graphql]
+
+      @impl true
+      def __dobro_api_port__, do: true
 
       # route :get_thing,
       #   query: #{inspect(bc_module)}.App.ThingQueries.GetThing,
