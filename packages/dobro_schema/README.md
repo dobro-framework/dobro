@@ -18,11 +18,13 @@ end
 
 ### Optional validators
 
-Some field types require additional dependencies:
+Some field types work better with extra dependencies. Add them only if you need them
+(they are marked `optional: true` so Phoenix hosts are not forced to resolve Timex’s
+gettext/idna tree):
 
 ```elixir
 {:ex_phone_number, "~> 0.4"},   # :phone_number validation on strings
-{:timex, "~> 3.7"}              # flexible datetime parsing
+{:timex, "~> 3.7"}              # flexible non-ISO datetime parsing
 ```
 
 ## Schemas

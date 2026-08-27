@@ -85,6 +85,8 @@ Git sparse deps also work: each package’s `mix.exs` falls back to
 
 when the sibling path is missing (so `{:dobro, github: "dobro-framework/dobro", sparse: "packages/dobro", branch: "main"}` pulls the core stack).
 
+**Phoenix note:** `timex` and `ex_phone_number` are optional deps of `dobro_schema`. You do not need gettext overrides for a default install. Add Timex yourself only if you want non-ISO datetime parsing.
+
 ## Development
 
 ```bash

@@ -26,8 +26,10 @@ defmodule DobroSchema.MixProject do
     [
       {:jason, "~> 1.2"},
       {:plug, "~> 1.14"},
-      {:ex_phone_number, "~> 0.4.8"},
-      {:timex, "~> 3.7"},
+      {:ex_phone_number, "~> 0.4.8", optional: true},
+      # Optional: richer datetime string formats. Not required for ISO8601.
+      # Keeping it optional avoids Timex/gettext/idna conflicts with Phoenix 1.8+.
+      {:timex, "~> 3.7", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
