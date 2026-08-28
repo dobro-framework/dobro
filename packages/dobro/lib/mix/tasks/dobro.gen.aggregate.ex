@@ -13,8 +13,9 @@ if Code.ensure_loaded?(Igniter) do
     ## Options
 
     * `--fields` — comma-separated `name:type` pairs (default `name:string`)
-    * `--tenant` — schema-per-tenant repos (`tenant_strategy: :schema`)
+    * `--tenant` — schema-per-tenant repos (`tenant_strategy: :schema`); skips migration generation
     * `--bc` — create the bounded context first if missing (runs `dobro.gen.bc`)
+    * `--no-migration` — skip Ecto migration generation (default: generate when not `--tenant`)
     """
 
     use Igniter.Mix.Task
@@ -28,12 +29,14 @@ if Code.ensure_loaded?(Igniter) do
         schema: [
           fields: :string,
           tenant: :boolean,
-          bc: :boolean
+          bc: :boolean,
+          migration: :boolean
         ],
         defaults: [
           fields: "name:string",
           tenant: false,
-          bc: true
+          bc: true,
+          migration: true
         ],
         positional: [:aggregate],
         composes: ["dobro.gen.bc"]
@@ -53,6 +56,7 @@ if Code.ensure_loaded?(Igniter) do
       fields = Naming.parse_fields(igniter.args.options[:fields])
       tenant? = !!igniter.args.options[:tenant]
       create_bc? = igniter.args.options[:bc] != false
+      migration? = igniter.args.options[:migration] != false
 
       igniter
       |> maybe_gen_bc(meta.bc_module, create_bc?, tenant?)
@@ -62,15 +66,12 @@ if Code.ensure_loaded?(Igniter) do
       |> create_queries(meta, fields, tenant?)
       |> create_ports(meta)
       |> create_schema(meta, fields)
+      |> create_migration(meta, fields, tenant?, migration?)
       |> create_write_repo(meta, tenant?)
       |> create_read_repo(meta, fields, tenant?)
       |> patch_api(meta, tenant?)
       |> patch_bc_registry(meta)
-      |> Igniter.add_notice("""
-      Aggregate #{inspect(meta.aggregate_module)} generated under #{inspect(meta.bc_module)}.
-
-      Add a migration for table #{inspect(meta.table)}, then implement any custom specs.
-      """)
+      |> Igniter.add_notice(completion_notice(meta, migration?, tenant?))
     end
 
     defp maybe_gen_bc(igniter, bc_module, true, tenant?) do
@@ -496,6 +497,73 @@ if Code.ensure_loaded?(Igniter) do
         {false, igniter} ->
           Igniter.add_warning(igniter, "API module #{inspect(api)} missing; skip route patch.")
       end
+    end
+
+    defp create_migration(igniter, meta, fields, tenant?, migration?) do
+      cond do
+        !migration? ->
+          igniter
+
+        tenant? ->
+          Igniter.add_notice(
+            igniter,
+            "Skipped migration for #{inspect(meta.table)} (--tenant uses schema-per-tenant prefixes; create the table in each tenant schema)."
+          )
+
+        true ->
+          {igniter, repo} = Igniter.Libs.Ecto.select_repo(igniter)
+
+          if repo do
+            name = "create_#{meta.table}"
+
+            Igniter.Libs.Ecto.gen_migration(igniter, repo, name,
+              body: migration_body(meta, fields)
+            )
+          else
+            Igniter.add_warning(
+              igniter,
+              "No Ecto.Repo found — add a migration for table #{inspect(meta.table)} manually."
+            )
+          end
+      end
+    end
+
+    defp migration_body(meta, fields) do
+      field_lines =
+        Enum.map_join(fields, "\n", fn {name, type} ->
+          "      add :#{name}, #{inspect(ecto_type(type))}, null: false"
+        end)
+
+      """
+      def change do
+        create table(#{inspect(meta.table)}) do
+      #{field_lines}
+          add :version, :integer, default: 1, null: false
+
+          timestamps(type: :utc_datetime, inserted_at: :created_at)
+        end
+      end
+      """
+    end
+
+    defp completion_notice(meta, migration?, tenant?) do
+      migration_hint =
+        cond do
+          tenant? ->
+            "Create table #{inspect(meta.table)} in each tenant schema."
+
+          migration? ->
+            "Run `mix ecto.migrate` to create table #{inspect(meta.table)}."
+
+          true ->
+            "Add a migration for table #{inspect(meta.table)}."
+        end
+
+      """
+      Aggregate #{inspect(meta.aggregate_module)} generated under #{inspect(meta.bc_module)}.
+
+      #{migration_hint} Implement any custom specs as needed.
+      """
     end
 
     defp patch_bc_registry(igniter, meta) do

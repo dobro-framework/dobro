@@ -23,8 +23,7 @@ if Code.ensure_loaded?(Igniter) do
 
     @impl Igniter.Mix.Task
     def igniter(igniter) do
-      base = Igniter.Project.Module.module_name_prefix(igniter)
-      web = Module.concat(base, Web)
+      web = Igniter.Libs.Phoenix.web_module(igniter)
       schema = Module.concat(web, Schema)
 
       igniter
