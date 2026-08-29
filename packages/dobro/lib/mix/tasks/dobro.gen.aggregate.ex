@@ -16,11 +16,14 @@ if Code.ensure_loaded?(Igniter) do
     * `--tenant` — schema-per-tenant repos (`tenant_strategy: :schema`); skips migration generation
     * `--bc` — create the bounded context first if missing (runs `dobro.gen.bc`)
     * `--no-migration` — skip Ecto migration generation (default: generate when not `--tenant`)
+
+    Re-running for an existing aggregate skips modules that are already present and only
+    adds missing migrations, API routes, and adapter registrations.
     """
 
     use Igniter.Mix.Task
 
-    alias Dobro.Igniter.Naming
+    alias Dobro.Igniter.{Helpers, Naming}
 
     @impl Igniter.Mix.Task
     def info(_argv, _parent) do
@@ -100,7 +103,7 @@ if Code.ensure_loaded?(Igniter) do
           "    field :#{name}, #{inspect(type)}, required: true"
         end)
 
-      Igniter.Project.Module.create_module(igniter, meta.aggregate_module, """
+      Helpers.create_module_unless_exists(igniter, meta.aggregate_module, """
       @moduledoc \"\"\"
       #{meta.aggregate_name} aggregate
       \"\"\"
@@ -213,7 +216,7 @@ if Code.ensure_loaded?(Igniter) do
           "    field :#{name}, #{inspect(type)}"
         end)
 
-      Igniter.Project.Module.create_module(igniter, commands, """
+      Helpers.create_module_unless_exists(igniter, commands, """
       @moduledoc false
       use Dobro.App.CommandDefinition
       alias Dobro.App.Types
@@ -292,7 +295,7 @@ if Code.ensure_loaded?(Igniter) do
           ""
         end
 
-      Igniter.Project.Module.create_module(igniter, queries, """
+      Helpers.create_module_unless_exists(igniter, queries, """
       @moduledoc false
       use Dobro.App.QueryDefinition
       alias Dobro.App.Types.{Pagination, Query}
@@ -345,11 +348,11 @@ if Code.ensure_loaded?(Igniter) do
       write_port = Module.concat([meta.bc_module, Ports, :"#{meta.aggregate_name}WriteRepo"])
 
       igniter
-      |> Igniter.Project.Module.create_module(read_port, """
+      |> Helpers.create_module_unless_exists(read_port, """
       @moduledoc false
       use Dobro.Infra.Data.ReadRepo.PortDefinition
       """)
-      |> Igniter.Project.Module.create_module(write_port, """
+      |> Helpers.create_module_unless_exists(write_port, """
       @moduledoc false
       use Dobro.Infra.Data.WriteRepo.PortDefinition
       """)
@@ -374,7 +377,7 @@ if Code.ensure_loaded?(Igniter) do
         |> Enum.map(fn {name, _} -> ":#{name}" end)
         |> Enum.join(", ")
 
-      Igniter.Project.Module.create_module(igniter, schema, """
+      Helpers.create_module_unless_exists(igniter, schema, """
       @moduledoc false
       use TypedEctoSchema
       import Ecto.Changeset
@@ -401,7 +404,7 @@ if Code.ensure_loaded?(Igniter) do
       tenant_opts =
         if tenant?, do: ",\n        tenant_strategy: :schema", else: ""
 
-      Igniter.Project.Module.create_module(igniter, write_repo, """
+      Helpers.create_module_unless_exists(igniter, write_repo, """
       @moduledoc false
       alias #{inspect(meta.aggregate_module)}
       alias #{inspect(schema)}
@@ -429,7 +432,7 @@ if Code.ensure_loaded?(Igniter) do
         |> Enum.map(fn {name, _} -> ":#{name}" end)
         |> Enum.join(", ")
 
-      Igniter.Project.Module.create_module(igniter, read_repo, """
+      Helpers.create_module_unless_exists(igniter, read_repo, """
       @moduledoc false
       alias #{inspect(schema)}
 
@@ -488,15 +491,13 @@ if Code.ensure_loaded?(Igniter) do
         policy: @manage
       """
 
-      case Igniter.Project.Module.module_exists(igniter, api) do
-        {true, igniter} ->
-          Igniter.Project.Module.find_and_update_module!(igniter, api, fn zipper ->
-            {:ok, Igniter.Code.Common.add_code(zipper, routes)}
-          end)
-
-        {false, igniter} ->
-          Igniter.add_warning(igniter, "API module #{inspect(api)} missing; skip route patch.")
-      end
+      Helpers.patch_module_unless_contains(
+        igniter,
+        api,
+        "route :get_#{meta.singular}",
+        fn zipper -> {:ok, Igniter.Code.Common.add_code(zipper, routes)} end,
+        missing_notice: "API module #{inspect(api)} missing; skip route patch."
+      )
     end
 
     defp create_migration(igniter, meta, fields, tenant?, migration?) do
@@ -516,9 +517,24 @@ if Code.ensure_loaded?(Igniter) do
           if repo do
             name = "create_#{meta.table}"
 
-            Igniter.Libs.Ecto.gen_migration(igniter, repo, name,
-              body: migration_body(meta, fields)
-            )
+            cond do
+              migration_file_exists?(repo, meta.table) ->
+                Igniter.add_notice(
+                  igniter,
+                  "Migration for table #{inspect(meta.table)} already exists — skipped."
+                )
+
+              migration_module_exists?(igniter, repo, name) ->
+                Igniter.add_notice(
+                  igniter,
+                  "Migration #{inspect(Module.concat([repo, Migrations, Macro.camelize(name)]))} already exists — skipped."
+                )
+
+              true ->
+                Igniter.Libs.Ecto.gen_migration(igniter, repo, name,
+                  body: migration_body(meta, fields)
+                )
+            end
           else
             Igniter.add_warning(
               igniter,
@@ -566,6 +582,28 @@ if Code.ensure_loaded?(Igniter) do
       """
     end
 
+    defp migration_module_exists?(igniter, repo, name) do
+      migration_module = Module.concat([repo, Migrations, Macro.camelize(name)])
+
+      case Igniter.Project.Module.module_exists(igniter, migration_module) do
+        {true, _} -> true
+        {false, _} -> false
+      end
+    end
+
+    defp migration_file_exists?(repo, table) do
+      migration_dir =
+        Path.join(
+          "priv/#{repo |> Module.split() |> List.last() |> Macro.underscore()}",
+          "migrations"
+        )
+
+      migration_dir
+      |> Path.join("*_create_#{table}.exs")
+      |> Path.wildcard()
+      |> Enum.any?()
+    end
+
     defp patch_bc_registry(igniter, meta) do
       registry = Module.concat(meta.bc_module, AdapterRegistry)
       read_repo = Module.concat([meta.bc_module, Infra, Data, :"#{meta.aggregate_name}ReadRepo"])
@@ -576,15 +614,13 @@ if Code.ensure_loaded?(Igniter) do
       register #{inspect(write_repo)}
       """
 
-      case Igniter.Project.Module.module_exists(igniter, registry) do
-        {true, igniter} ->
-          Igniter.Project.Module.find_and_update_module!(igniter, registry, fn zipper ->
-            {:ok, Igniter.Code.Common.add_code(zipper, regs)}
-          end)
-
-        {false, igniter} ->
-          Igniter.add_warning(igniter, "BC registry #{inspect(registry)} missing.")
-      end
+      Helpers.patch_module_unless_contains(
+        igniter,
+        registry,
+        "register #{inspect(read_repo)}",
+        fn zipper -> {:ok, Igniter.Code.Common.add_code(zipper, regs)} end,
+        missing_notice: "BC registry #{inspect(registry)} missing."
+      )
     end
 
     defp ecto_type(:string), do: :string
