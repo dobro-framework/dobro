@@ -25,6 +25,7 @@ defmodule Dobro.Infra.Repo do
   def update(struct, opts \\ []), do: apply(repo(), :update, [struct, opts])
   def update_all(queryable, updates, opts \\ []),
     do: apply(repo(), :update_all, [queryable, updates, opts])
+  def delete_all(queryable, opts \\ []), do: apply(repo(), :delete_all, [queryable, opts])
   def delete(struct, opts \\ []), do: apply(repo(), :delete, [struct, opts])
   def preload(struct_or_structs, preloads, opts \\ []),
     do: apply(repo(), :preload, [struct_or_structs, preloads, opts])

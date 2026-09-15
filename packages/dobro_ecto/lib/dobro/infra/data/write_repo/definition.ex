@@ -121,12 +121,54 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
             %Context{} = context
           ) do
         with {:ok, %Ecto.Changeset{} = changeset} <- to_changeset(aggregate, schema),
-             {:ok, opts} <- repo_opts(context),
-             {:ok, %_{} = schema} <- Repo.update(changeset, opts) do
-          schema
-          |> maybe_preload(opts)
-          |> to_unit_of_work()
+             {:ok, opts} <- repo_opts(context) do
+          occ? =
+            Map.has_key?(schema, :version) and is_integer(schema.version) and
+              is_integer(aggregate.version) and aggregate.version != schema.version
+
+          changeset =
+            if occ? do
+              expected_version = schema.version
+
+              changeset
+              |> Ecto.Changeset.delete_change(:version)
+              |> then(fn cs -> %{cs | data: Map.put(cs.data, :version, expected_version)} end)
+              |> Ecto.Changeset.optimistic_lock(:version, fn _current -> aggregate.version end)
+            else
+              changeset
+            end
+
+          opts = if occ?, do: Keyword.put_new(opts, :stale_error_field, :version), else: opts
+
+          case Repo.update(changeset, opts) do
+            {:ok, %_{} = schema} ->
+              schema
+              |> maybe_preload(opts)
+              |> to_unit_of_work()
+
+            {:error, %Ecto.Changeset{} = cs} ->
+              if stale_changeset?(cs) do
+                {:error, Error.new(:concurrent_modification)}
+              else
+                {:error, cs}
+              end
+
+            {:error, :stale} ->
+              {:error, Error.new(:concurrent_modification)}
+
+            {:error, error} ->
+              {:error, error}
+          end
+        else
+          other -> other
         end
+      end
+
+      defp stale_changeset?(%Ecto.Changeset{errors: errors}) do
+        Enum.any?(errors, fn
+          {:version, {_, opts}} -> Keyword.get(opts, :stale, false) == true
+          _ -> false
+        end)
       end
 
       def save(%UnitOfWork{} = unit_of_work, %Context{} = context) do

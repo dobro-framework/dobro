@@ -14,6 +14,9 @@ defmodule Dobro.Config do
 
       config :dobro_runtime,
         pubsub: MyApp.PubSub,
+        actor_lock: {Dobro.Runtime.ActorLock.None, []},
+        actor_registry: {Dobro.Runtime.ActorRegistry.Local, []},
+        event_consumer_mode: :singleton,
         outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
 
       config :dobro_cqrs,

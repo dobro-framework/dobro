@@ -1,31 +1,48 @@
 defmodule Dobro.Runtime.AggregateActor do
   @moduledoc """
-  Actor for an aggregate - as a GenServer
+  GenServer concurrency gateway for a single aggregate identity.
+
+  In cluster mode the process holds an `ActorLock` for its key so only one
+  instance runs cluster-wide. Idle actors stop after a TTL and release the lock.
   """
   use GenServer
+
   import Dobro.Runtime.Persistence
+
   alias Dobro.App.Auth.TenantContext
+  alias Dobro.Error
+  alias Dobro.Runtime.ActorLock
+  alias Dobro.Runtime.ActorRegistry
 
   defmodule Config do
-    @moduledoc """
-    Config for the AggregateActor
-    """
+    @moduledoc false
     use TypedStruct
 
     typedstruct do
       field :aggregate_module, module()
-      field :repo_module, module()
       field :identity, map()
       field :tenant, TenantContext.t()
       field :load_fn, atom()
       field :persistence_strategy, atom()
+      field :actor_key, term()
+      field :holds_lock, boolean(), default: false
     end
   end
 
   @active_ttl 600_000
   @failed_ttl 5_000
+  @lock_released Dobro.Runtime.ActorLock.Postgres.lock_released_message()
 
   defstruct [:config, :unit_of_work, :load_error, :ttl_ref, pending_executes: []]
+
+  def child_spec(opts) do
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :actor_key)},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary,
+      type: :worker
+    }
+  end
 
   def start_link(opts) do
     aggregate_module = Keyword.fetch!(opts, :aggregate_module)
@@ -33,7 +50,8 @@ defmodule Dobro.Runtime.AggregateActor do
     tenant = Keyword.fetch!(opts, :tenant)
     load_fn = Keyword.get(opts, :load_fn, :get_by)
     persistence_strategy = Keyword.get(opts, :persistence_strategy, :stateful)
-    name = Keyword.fetch!(opts, :name)
+    actor_key = Keyword.fetch!(opts, :actor_key)
+    name = Keyword.get(opts, :name, ActorRegistry.via(actor_key))
 
     state = %__MODULE__{
       config: %{
@@ -41,7 +59,9 @@ defmodule Dobro.Runtime.AggregateActor do
         identity: identity,
         tenant: tenant,
         load_fn: load_fn,
-        persistence_strategy: persistence_strategy
+        persistence_strategy: persistence_strategy,
+        actor_key: actor_key,
+        holds_lock: false
       },
       unit_of_work: nil
     }
@@ -50,21 +70,20 @@ defmodule Dobro.Runtime.AggregateActor do
   end
 
   @doc """
-  Generates a unique name for the AggregateActor.
+  Stable term key for an aggregate actor.
 
-  `tenant` must already be normalized via `Dobro.Tenant.normalize/1` (as done by
-  `AggregateSupervisor`) with an immutable `:id`. Actors are never keyed by
-  identifier, which can be renamed while actors are running.
+  `tenant` must already be normalized via `Dobro.Tenant.normalize/1` with an immutable `:id`.
   """
-  def actor_name(aggregate_module, tenant, identity) do
-    tenant_key = TenantContext.partition_key(tenant)
-    identity_value = identity_value_for(identity)
-
-    "aggregate_actor_#{aggregate_module}_#{tenant_key}_#{identity_value}"
-    |> String.to_atom()
+  def actor_key(aggregate_module, tenant, identity) do
+    {:aggregate_actor, aggregate_module, TenantContext.partition_key(tenant),
+     identity_value_for(identity)}
   end
 
-  # converts to id:123:key:678 format (sorted for stable naming)
+  @doc false
+  def actor_name(aggregate_module, tenant, identity) do
+    actor_key(aggregate_module, tenant, identity)
+  end
+
   defp identity_value_for(identity) when is_map(identity) do
     identity
     |> Enum.sort()
@@ -75,7 +94,19 @@ defmodule Dobro.Runtime.AggregateActor do
 
   @impl GenServer
   def init(%__MODULE__{} = state) do
-    {:ok, state, {:continue, :load_aggregate}}
+    Process.flag(:trap_exit, true)
+
+    case ActorLock.try_acquire(state.config.actor_key, self()) do
+      :ok ->
+        state = put_in(state.config.holds_lock, true)
+        {:ok, state, {:continue, :load_aggregate}}
+
+      {:error, :locked} ->
+        {:stop, :lock_not_acquired}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl GenServer
@@ -119,9 +150,6 @@ defmodule Dobro.Runtime.AggregateActor do
     {:noreply, enqueue_execute(state, from, aggregate_fn, contract, message_identity, strategies)}
   end
 
-  @doc """
-  Executes the aggregate function
-  """
   def handle_call(
         {:execute, aggregate_fn, contract, message_identity, strategies},
         _from,
@@ -157,18 +185,27 @@ defmodule Dobro.Runtime.AggregateActor do
 
   @impl GenServer
   def handle_info(:ttl_expired, state) do
-    reason =
-      state.load_error || :idle_timeout
-
+    reason = state.load_error || :idle_timeout
     {:stop, {:shutdown, reason}, state}
   end
 
-  @doc """
-  Generates a via tuple for the AggregateActor
-  """
+  def handle_info({@lock_released, key, _reason}, %{config: %{actor_key: key}} = state) do
+    {:stop, {:shutdown, :lock_released}, %{state | config: %{state.config | holds_lock: false}}}
+  end
+
+  def handle_info({@lock_released, _key, _reason}, state), do: {:noreply, state}
+
+  @impl GenServer
+  def terminate(_reason, %{config: %{holds_lock: true, actor_key: key}}) do
+    ActorLock.release(key)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  @doc "Via tuple for the AggregateActor."
   def via(aggregate_module, tenant, identity) do
-    actor_name = actor_name(aggregate_module, tenant, identity)
-    {:via, Registry, {Dobro.Runtime.Registry, actor_name}}
+    ActorRegistry.via(actor_key(aggregate_module, tenant, identity))
   end
 
   defp enqueue_execute(state, from, aggregate_fn, contract, message_identity, strategies) do
@@ -203,8 +240,9 @@ defmodule Dobro.Runtime.AggregateActor do
   end
 
   defp reply_pending_errors(%{pending_executes: pending} = state, error) do
-    Enum.each(pending, fn {from, _, _} ->
-      GenServer.reply(from, {:error, error})
+    Enum.each(pending, fn
+      {from, _, _, _, _} -> GenServer.reply(from, {:error, error})
+      {from, _, _} -> GenServer.reply(from, {:error, error})
     end)
 
     %{state | pending_executes: []}
@@ -237,6 +275,9 @@ defmodule Dobro.Runtime.AggregateActor do
             state = %{state | unit_of_work: unit_of_work} |> schedule_ttl(:active)
             {{:ok, %{value: unit_of_work.aggregate, events: events}}, state}
 
+          {:error, %Error{reason: :concurrent_modification} = error} ->
+            {{:error, error}, invalidate_state(state)}
+
           {:error, error} ->
             {{:error, error}, state}
         end
@@ -246,19 +287,20 @@ defmodule Dobro.Runtime.AggregateActor do
     end
   end
 
+  defp invalidate_state(state) do
+    %{state | unit_of_work: nil, load_error: Error.new(:concurrent_modification)}
+    |> schedule_ttl(:failed)
+  end
+
   defp schedule_ttl(state, :active) do
     cancel_ttl(state)
-
     ref = Process.send_after(self(), :ttl_expired, @active_ttl)
-
     %{state | ttl_ref: ref}
   end
 
   defp schedule_ttl(state, :failed) do
     cancel_ttl(state)
-
     ref = Process.send_after(self(), :ttl_expired, @failed_ttl)
-
     %{state | ttl_ref: ref}
   end
 

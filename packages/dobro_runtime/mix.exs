@@ -29,6 +29,7 @@ defmodule DobroRuntime.MixProject do
       dobro(:dobro_domain),
       dobro(:dobro_ecto),
       dobro(:dobro_cqrs),
+      {:postgrex, ">= 0.0.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:typed_struct, "~> 0.3.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

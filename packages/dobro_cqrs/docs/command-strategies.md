@@ -61,10 +61,12 @@ Controls **how** aggregate state and domain events are stored after a successful
 
 | Shorthand | Module | Description |
 |-----------|--------|-------------|
-| `:stateful` | `PersistenceStrategy.Stateful` | **Default.** Write snapshot + events through WriteRepo ports. |
-| `:event_sourced` | `PersistenceStrategy.EventSourced` | Append to event store; state derived by replay. |
+| `:stateful` | `PersistenceStrategy.Stateful` | **Default.** Write snapshot + events through WriteRepo ports. Optimistic concurrency uses the aggregate `version` field (`:concurrent_modification` on conflict). |
+| `:event_sourced` | `PersistenceStrategy.EventSourced` | Append to event store; state derived by replay. Append uses event `version` as `event_number`; unique `(stream_name, event_number)` violations map to `:concurrent_modification`. |
 
 Persistence strategies do **not** publish events to subscribers.
+
+On multi-node hosts, pair actor execution with Dobro's clustering config (`actor_lock` / `actor_registry`) so each aggregate identity has a single in-memory actor cluster-wide. See [`dobro_runtime` Clustering / multi-node](../../dobro_runtime/README.md#clustering--multi-node).
 
 Shared write logic (enrich events, resolve insert/update/delete, call WriteRepo) lives in a helper module — not a strategy itself:
 

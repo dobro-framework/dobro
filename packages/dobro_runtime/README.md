@@ -27,6 +27,9 @@ end
 ```elixir
 config :dobro_runtime,
   pubsub: MyApp.PubSub,
+  actor_lock: {Dobro.Runtime.ActorLock.None, []},
+  actor_registry: {Dobro.Runtime.ActorRegistry.Local, []},
+  event_consumer_mode: :singleton,
   outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
 
 config :dobro_cqrs,
@@ -37,21 +40,48 @@ config :dobro_cqrs,
 
 Set `event_delivery_strategy: :outbox` and `outbox_relay: [enabled: true, ...]` for transactional outbox delivery via `Dobro.Runtime.OutboxRelay`.
 
+### Clustering / multi-node
+
+Aggregate actors keep state in memory. On multiple nodes you must run **at most one actor per identity** cluster-wide, and (by default) **at most one subscriber** per event handler / projector.
+
+| Config | Single-node / test | Multi-node cluster |
+|--------|--------------------|--------------------|
+| `actor_lock` | `{ActorLock.None, []}` | `{ActorLock.Postgres, []}` |
+| `event_consumer_mode` | `:singleton` (local only under None) | `:singleton` (lock holder subscribes) |
+| Host BEAM cluster | not required | DNSCluster / libcluster (app responsibility) |
+
+`ActorLock.Postgres` uses session advisory locks plus an `actor_leases` table for cross-node `whereis`. It needs a **dedicated Postgrex connection** — not PgBouncer/RDS Proxy in transaction pooling mode.
+
+Per-handler override:
+
+```elixir
+use Dobro.App.EventHandler,
+  stream_name: MyApp.Category.__stream_name__(),
+  consumer_mode: :every_node  # explicit fan-out when safe
+```
+
+Optimistic concurrency: stateful updates use the aggregate `version` field; event-sourced appends use `event.version` as `event_number` and map unique violations to `:concurrent_modification`.
+
 ## Supervision tree
 
 Add these children to your application supervisor:
 
 ```elixir
-children = [
-  {Registry, keys: :unique, name: Dobro.Runtime.Registry},
-  {Dobro.Runtime.AggregateSupervisor, name: Dobro.Runtime.AggregateSupervisor},
-  {Dobro.Runtime.EventHandlerSupervisor, name: Dobro.Runtime.EventHandlerSupervisor}
-]
+children =
+  [
+    {Registry, keys: :unique, name: Dobro.Runtime.Registry}
+  ] ++
+    Dobro.Runtime.ActorLock.child_specs() ++
+    [
+      {Dobro.Runtime.AggregateSupervisor, name: Dobro.Runtime.AggregateSupervisor},
+      {Dobro.Runtime.EventHandlerSupervisor, name: Dobro.Runtime.EventHandlerSupervisor}
+    ]
 ```
 
 | Process | Role |
 |---------|------|
-| `Registry` | Lookup aggregate actors by `{module, tenant, identity}` |
+| `Registry` | Lookup aggregate / handler actors by stable term keys |
+| `ActorLock` children | Optional Postgres lock connection + lock server |
 | `AggregateSupervisor` | DynamicSupervisor that starts aggregate GenServers on demand |
 | `EventHandlerSupervisor` | Starts one PubSub subscriber per registered event handler at boot |
 

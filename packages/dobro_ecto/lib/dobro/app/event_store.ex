@@ -9,6 +9,7 @@ defmodule Dobro.App.EventStore do
 
   alias Dobro.App.Auth.TenantContext
   alias Dobro.App.DomainEventCodec
+  alias Dobro.Error
   alias Dobro.Infra.Data.DomainEventRecordSchema
   alias Dobro.Infra.Repo
   alias Dobro.Tenant
@@ -31,20 +32,20 @@ defmodule Dobro.App.EventStore do
 
   @doc """
   Appends enriched domain events to a stream inside the current transaction.
+
+  Uses each event's `version` as `event_number`. Conflicts on the unique
+  `(stream_name, event_number)` index return `{:error, :concurrent_modification}`.
   """
   @spec append(String.t(), [struct()]) :: :ok | {:error, term()}
   def append(stream_name, events) when is_list(events) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:microsecond)
-    starting_number = next_event_number(stream_name)
 
     rows =
-      events
-      |> Enum.with_index(starting_number)
-      |> Enum.map(fn {event, event_number} ->
+      Enum.map(events, fn event ->
         encoded = DomainEventCodec.encode(event)
+        event_number = Map.fetch!(event, :version)
 
         %{
-          id: Ecto.UUID.generate(),
           stream_name: stream_name,
           event_number: event_number,
           event_type: encoded["event_type"],
@@ -55,11 +56,34 @@ defmodule Dobro.App.EventStore do
         }
       end)
 
-    case Repo.insert_all(DomainEventRecordSchema, rows) do
-      {count, _} when count == length(rows) -> :ok
-      _ -> {:error, :event_store_append_failed}
+    case Repo.insert_all(DomainEventRecordSchema, rows, prefix: schema_prefix()) do
+      {count, _} when count == length(rows) ->
+        :ok
+
+      _ ->
+        {:error, :event_store_append_failed}
     end
+  rescue
+    e in Postgrex.Error ->
+      if unique_violation?(e) do
+        {:error, Error.new(:concurrent_modification)}
+      else
+        reraise e, __STACKTRACE__
+      end
+
+    e in Ecto.ConstraintError ->
+      if unique_violation?(e) do
+        {:error, Error.new(:concurrent_modification)}
+      else
+        reraise e, __STACKTRACE__
+      end
   end
+
+  defp unique_violation?(%Postgrex.Error{postgres: %{code: :unique_violation}}), do: true
+
+  defp unique_violation?(%Ecto.ConstraintError{type: :unique}), do: true
+
+  defp unique_violation?(_), do: false
 
   @doc """
   Reads all events for a stream ordered by event number.
@@ -69,8 +93,12 @@ defmodule Dobro.App.EventStore do
     DomainEventRecordSchema
     |> where([event], event.stream_name == ^stream_name)
     |> order_by([event], asc: event.event_number)
-    |> Repo.all()
+    |> Repo.all(prefix: schema_prefix())
     |> Enum.map(&decode_record/1)
+  end
+
+  defp schema_prefix do
+    Application.get_env(:dobro_ecto, :event_store_schema, "event_store")
   end
 
   @doc """
@@ -96,18 +124,6 @@ defmodule Dobro.App.EventStore do
 
   defp decode_record(%DomainEventRecordSchema{event_payload: payload}) do
     DomainEventCodec.decode(payload)
-  end
-
-  defp next_event_number(stream_name) do
-    query =
-      from event in DomainEventRecordSchema,
-        where: event.stream_name == ^stream_name,
-        select: max(event.event_number)
-
-    case Repo.one(query) do
-      nil -> 1
-      number -> number + 1
-    end
   end
 
   defp tenant_partition(nil), do: Tenant.partition_key!(nil)

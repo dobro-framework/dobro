@@ -5,9 +5,10 @@ defmodule Dobro.Infra.Data.DomainEventRecordSchema do
 
   use TypedEctoSchema
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, :id, autogenerate: true}
+  @schema_prefix "event_store"
 
-  typed_schema "domain_events", prefix: "event_store" do
+  typed_schema "domain_events" do
     field :stream_name, :string
     field :event_number, :integer
     field :event_type, :string

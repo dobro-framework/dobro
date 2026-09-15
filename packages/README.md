@@ -116,8 +116,8 @@ This is true for create, update, and delete flows. Deletes emit `*Deleted` event
 
 | Strategy | Description | Status |
 |----------|-------------|--------|
-| **Stateful persistence** | Aggregate state is stored in relational tables via write repositories. Domain events are persisted alongside state and published to subscribers. Optimistic concurrency is enforced through a `version` field. | Available |
-| **Event-sourced persistence** | Aggregate state is derived from an append-only event stream. Commands append events; state is rebuilt by replay. | Available |
+| **Stateful persistence** | Aggregate state is stored in relational tables via write repositories. Domain events are persisted alongside state and published to subscribers. Optimistic concurrency is enforced through a `version` field (`:concurrent_modification` on conflict). | Available |
+| **Event-sourced persistence** | Aggregate state is derived from an append-only event stream. Commands append events (using event `version` as `event_number`); state is rebuilt by replay. Unique stream/version conflicts map to `:concurrent_modification`. | Available |
 
 Both strategies use the same domain model, command handlers, and event definitions. Persistence strategies determine which storage applies to each aggregate. You can mix strategies across bounded contexts in the same application.
 

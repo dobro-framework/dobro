@@ -5,9 +5,13 @@ defmodule Dobro.App.Projector do
   defmacro __using__(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__) |> to_string()
     stream_name = Keyword.fetch!(opts, :stream_name)
+    consumer_mode = Keyword.get(opts, :consumer_mode)
 
     quote do
-      use Dobro.App.EventHandler, stream_name: unquote(stream_name)
+      use Dobro.App.EventHandler,
+        stream_name: unquote(stream_name),
+        consumer_mode: unquote(consumer_mode)
+
       import Dobro.App.Projector.ProjectionHelpers
 
       def handle(%{} = event) do

@@ -189,6 +189,7 @@ if Code.ensure_loaded?(Igniter) do
       |> Igniter.Project.Application.add_new_child(
         {Registry, keys: :unique, name: Dobro.Runtime.Registry}
       )
+      # Also start Dobro.Runtime.ActorLock.child_specs() when using ActorLock.Postgres
       |> Igniter.Project.Application.add_new_child(
         {Dobro.Runtime.AggregateSupervisor, name: Dobro.Runtime.AggregateSupervisor}
       )
