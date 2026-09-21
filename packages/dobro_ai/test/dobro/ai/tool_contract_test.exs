@@ -2,7 +2,29 @@ defmodule Dobro.AI.ToolContractTest do
   use ExUnit.Case, async: true
 
   alias Dobro.AI.ToolContract
-  alias Fm.TenantManagement.Archive.ArchiveApi
+
+  defmodule ListImportsQuery do
+    use Dobro.App.Query
+    use Dobro.App.Definition
+
+    schema do
+      field :tenant_id, :id
+    end
+  end
+
+  defmodule GetEntryQuery do
+    use Dobro.App.Query
+    use Dobro.App.Definition
+
+    schema do
+      field :id, :id, required: true
+    end
+  end
+
+  defmodule ArchiveApi do
+    def __queries__(:list_imports), do: {ListImportsQuery, []}
+    def __queries__(:get_entry), do: {GetEntryQuery, []}
+  end
 
   test "required_fields reads schema metadata" do
     refute "tenant_id" in ToolContract.required_fields({ArchiveApi, :list_imports})

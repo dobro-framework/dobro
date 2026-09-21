@@ -428,8 +428,6 @@ defmodule Dobro.AI.Agent do
     end
   end
 
-  defp halt_from_tool_result?(_result, _name, _args), do: :ok
-
   defp compact_duplicate_tool_messages(messages, ctx) do
     call_keys = tool_call_keys(messages, ctx)
 

@@ -15,8 +15,6 @@ defmodule Dobro.App.QueryHandler do
   @callback execute(term()) :: {:ok, term()} | {:error, term()}
   @callback execute(term(), ExecutionContext.t()) :: {:ok, term()} | {:error, term()}
 
-  alias Dobro.App.DataTransfer.DTO
-
   defmodule State do
     @moduledoc """
     The QueryHandler state

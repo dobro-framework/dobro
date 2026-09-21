@@ -3,10 +3,16 @@ defmodule Dobro.Spec.AdapterMultiPortTest do
 
   defmodule ExamplePort do
     use Dobro.Spec.Port
+
+    @callback example() :: :ok
+    @optional_callbacks example: 0
   end
 
   defmodule OtherPort do
     use Dobro.Spec.Port
+
+    @callback other() :: :ok
+    @optional_callbacks other: 0
   end
 
   defmodule MultiPortAdapter do

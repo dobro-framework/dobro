@@ -29,6 +29,7 @@ defmodule DobroEcto.MixProject do
       dobro(:dobro_domain),
       {:ecto, "~> 3.1"},
       {:ecto_sql, "~> 3.1"},
+      {:postgrex, "~> 0.19 or ~> 1.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:typed_ecto_schema, "~> 0.4.3", runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

@@ -87,20 +87,17 @@ defmodule Dobro.AI.ApiToolExecutor do
     contract_driven? = Keyword.get(opts, :contract_driven, true)
     allowed_tenant_id = Keyword.get(opts, :allowed_tenant_id)
 
-    with {:ok, atom_args} <- decode_arguments(args) do
-      atom_args
-      |> normalize_tool_args(execution_context, contract_driven?)
-      |> maybe_clamp_displayed_query(route_ref)
-      |> then(fn normalized ->
-        case route_ref do
-          nil -> normalized
-          ref -> enforce_allowed_scope(ref, normalized, allowed_tenant_id, contract_driven?)
-        end
-      end)
-      |> stringify_keys()
-    else
-      _ -> stringify_keys(args)
-    end
+    args
+    |> atomize_keys()
+    |> normalize_tool_args(execution_context, contract_driven?)
+    |> maybe_clamp_displayed_query(route_ref)
+    |> then(fn normalized ->
+      case route_ref do
+        nil -> normalized
+        ref -> enforce_allowed_scope(ref, normalized, allowed_tenant_id, contract_driven?)
+      end
+    end)
+    |> stringify_keys()
   end
 
   defp enforce_optional_tenant_id(route_ref, args, allowed_tenant_id) do
