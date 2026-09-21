@@ -8,7 +8,7 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
 
   @behaviour Dobro.App.Command.ExecutionStrategy
 
-  alias Dobro.App.CommandHandler.Helpers
+  alias Dobro.App.CommandHandler.Pipeline, as: CommandPipeline
   alias Dobro.App.Command.Strategy
   alias Dobro.Error
   alias Dobro.Pipeline
@@ -31,7 +31,7 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
   end
 
   defp invoke_actor(%Pipeline{} = pipeline, call_fn, aggregate_module, strategies) do
-    contract = Helpers.contract_from_pipeline(pipeline)
+    contract = CommandPipeline.contract_from_pipeline(pipeline)
 
     case AggregateSupervisor.ensure_started(
            aggregate_module,

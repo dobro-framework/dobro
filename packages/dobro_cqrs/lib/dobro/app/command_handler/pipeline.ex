@@ -1,9 +1,7 @@
-defmodule Dobro.App.CommandHandler.Helpers do
+defmodule Dobro.App.CommandHandler.Pipeline do
   @moduledoc """
-  Pipeline steps shared by command handlers generated via `Dobro.App.CommandHandler`.
-
-  Provides identity resolution, specification checks, actor invocation, and
-  persistence helpers used during command execution.
+  Command-handler pipeline steps: identity resolution, specification checks,
+  domain invocation, and persistence used during command execution.
   """
 
   alias Dobro.App.Command.Strategy

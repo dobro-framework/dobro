@@ -79,6 +79,6 @@ defmodule Dobro.App.QueryResultTest do
 
     assert {:ok, %{ok: true}} =
              %Pipeline{state: %{result: %{ok: true}}, input: query, errors: []}
-             |> Dobro.App.QueryHandler.Helpers.finalize(:result)
+             |> Dobro.App.QueryHandler.Pipeline.finalize(:result)
   end
 end

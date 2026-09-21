@@ -9,14 +9,14 @@ defmodule Dobro.App.Command.ExecutionStrategy.Inline do
   @behaviour Dobro.App.Command.ExecutionStrategy
 
   alias Dobro.App.Command.Commit
-  alias Dobro.App.CommandHandler.Helpers
+  alias Dobro.App.CommandHandler.Pipeline, as: CommandPipeline
   alias Dobro.App.Command.Strategy
   alias Dobro.Pipeline
 
   @impl true
   def execute(%Pipeline{} = pipeline, call_fn, aggregate_module, opts, %Strategy{} = strategies) do
     pipeline
-    |> Helpers.invoke_direct(call_fn, aggregate_module, opts)
+    |> CommandPipeline.invoke_direct(call_fn, aggregate_module, opts)
     |> Commit.apply_to_pipeline(strategies)
   end
 end

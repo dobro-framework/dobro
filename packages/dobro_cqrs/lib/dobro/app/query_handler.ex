@@ -47,7 +47,6 @@ defmodule Dobro.App.QueryHandler do
       @before_compile {Dobro.App.QueryHandler.Wiring, :__before_compile__}
 
       import Dobro.App.QueryHandler, only: [handle: 2, handle: 3, handle: 4]
-      import Dobro.App.QueryHandler.Helpers
       import Dobro.App.QueryHandler.Pipeline, except: [call: 3, call: 4]
       import Dobro.Pipeline, except: [finalize: 1, finalize: 2]
       alias Dobro.Pipeline
@@ -68,51 +67,6 @@ defmodule Dobro.App.QueryHandler do
       end
 
       defoverridable(execute: 1, execute: 2)
-    end
-  end
-
-  defmodule Helpers do
-    @moduledoc """
-    Input preparation and result emission helpers for query handlers.
-    """
-
-    alias Dobro.App.ResultCaster
-    alias Dobro.Pipeline
-
-    @doc "Converts a handler result to DTOs when successful."
-    def emit({:ok, result}), do: {:ok, DTO.to_dto(result)}
-    def emit({:error, result}), do: {:error, result}
-    def emit(result), do: result
-
-    @doc """
-    Finalizes a query pipeline and casts the payload to the query's `result` type.
-    """
-    def finalize(%Pipeline{input: %mod{}} = pipeline, :result) do
-      case Pipeline.finalize(pipeline, :result) do
-        {:ok, result} -> ResultCaster.cast_message_result(mod, result)
-        other -> other
-      end
-    end
-
-    def finalize(%Pipeline{} = pipeline, keys), do: Pipeline.finalize(pipeline, keys)
-    def finalize(%Pipeline{} = pipeline), do: Pipeline.finalize(pipeline)
-
-    @doc "Enriches query input with values from the execution context."
-    def prepare_input(%_{} = input, provide, context) do
-      prepare_input(Map.from_struct(input), provide, context)
-    end
-
-    def prepare_input(%{} = input, provide, _context) when provide == [] do
-      input
-    end
-
-    def prepare_input(%{} = input, provide, context) do
-      provide
-      |> Enum.reduce(input, fn
-        :tenant_id, acc -> Map.put(acc, :tenant_id, context.tenant.id)
-        :tenant_identifier, acc -> Map.put(acc, :tenant_identifier, context.tenant.identifier)
-        key, _ -> raise "Cannot provide: #{key}"
-      end)
     end
   end
 

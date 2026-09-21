@@ -47,7 +47,7 @@ defmodule Dobro.App.CommandHandler do
       import Dobro.Pipeline, except: [finalize: 1, finalize: 2]
       alias Dobro.Pipeline
       import Dobro.App.CommandHandler, only: [handle: 2, handle: 3, handle: 4]
-      import Dobro.App.CommandHandler.Helpers
+      import Dobro.App.CommandHandler.Pipeline
     end
   end
 

@@ -1,9 +1,11 @@
 defmodule Dobro.App.QueryHandler.Pipeline do
   @moduledoc """
-  Pipeline entry points and repo execution for query handlers.
+  Query-handler pipeline: entry points, repo execution, input preparation,
+  and result finalization.
   """
 
   alias Dobro.App.DataTransfer.DTO
+  alias Dobro.App.ResultCaster
   alias Dobro.App.ExecutionContext
   alias Dobro.App.QueryHandler.State
   alias Dobro.App.Scope
@@ -12,7 +14,7 @@ defmodule Dobro.App.QueryHandler.Pipeline do
   alias Dobro.Pipeline
   alias Dobro.Tenant
 
-  import Dobro.Pipeline
+  import Dobro.Pipeline, except: [finalize: 1, finalize: 2]
 
   @doc "Initialises a query-handler pipeline from the input query struct."
   def pipeline(%_{} = query) do
@@ -196,5 +198,41 @@ defmodule Dobro.App.QueryHandler.Pipeline do
       result ->
         if as, do: put_in_workspace(pipeline, as, result), else: put_result(pipeline, result)
     end
+  end
+
+  @doc "Converts a handler result to DTOs when successful."
+  def emit({:ok, result}), do: {:ok, DTO.to_dto(result)}
+  def emit({:error, result}), do: {:error, result}
+  def emit(result), do: result
+
+  @doc """
+  Finalizes a query pipeline and casts the payload to the query's `result` type.
+  """
+  def finalize(%Pipeline{input: %mod{}} = pipeline, :result) do
+    case Pipeline.finalize(pipeline, :result) do
+      {:ok, result} -> ResultCaster.cast_message_result(mod, result)
+      other -> other
+    end
+  end
+
+  def finalize(%Pipeline{} = pipeline, keys), do: Pipeline.finalize(pipeline, keys)
+  def finalize(%Pipeline{} = pipeline), do: Pipeline.finalize(pipeline)
+
+  @doc "Enriches query input with values from the execution context."
+  def prepare_input(%_{} = input, provide, context) do
+    prepare_input(Map.from_struct(input), provide, context)
+  end
+
+  def prepare_input(%{} = input, provide, _context) when provide == [] do
+    input
+  end
+
+  def prepare_input(%{} = input, provide, context) do
+    provide
+    |> Enum.reduce(input, fn
+      :tenant_id, acc -> Map.put(acc, :tenant_id, context.tenant.id)
+      :tenant_identifier, acc -> Map.put(acc, :tenant_identifier, context.tenant.identifier)
+      key, _ -> raise "Cannot provide: #{key}"
+    end)
   end
 end

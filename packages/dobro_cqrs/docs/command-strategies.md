@@ -473,6 +473,6 @@ All phases below are implemented.
 
 ## References
 
-- Current implementation: `CommandHandler.Helpers`, `AggregateActor`, `WriteRepo.Persist`, `EventEnrichment`
+- Current implementation: `CommandHandler.Pipeline`, `AggregateActor`, `WriteRepo.Persist`, `EventEnrichment`
 - Analogous pattern: `Dobro.Infra.Data.WriteRepo.DeleteStrategy`
 - Pre-package behaviour: persist inside actor for identified commands

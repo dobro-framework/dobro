@@ -562,9 +562,9 @@ See [Command Strategies RFC](command-strategies.html) for override and combinati
 | `Dobro.App.CommandDefinition` | Define commands and inline command handlers |
 | `Dobro.App.QueryDefinition` | Define **application** queries and inline query handlers |
 | `Dobro.App.CommandHandler` | Command handler macro |
-| `Dobro.App.CommandHandler.Helpers` | Command pipeline steps |
+| `Dobro.App.CommandHandler.Pipeline` | Command pipeline steps |
 | `Dobro.App.QueryHandler` | Query handler macro |
-| `Dobro.App.QueryHandler.Pipeline` | Query pipeline — scope, repo call, result |
+| `Dobro.App.QueryHandler.Pipeline` | Query pipeline — scope, repo call, finalize, prepare_input |
 | `Dobro.App.Api` | Public API route DSL |
 | `Dobro.App.Types` | Shared Query, Pagination, Identified, Deleted, Filter, Sort types |
 | `Dobro.Cqrs.Config` | Strategy configuration |
