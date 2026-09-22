@@ -15,24 +15,18 @@ defmodule Dobro.Graphql.Schema do
     auto_apis = Keyword.get(opts, :auto_apis, true)
     mod = __CALLER__.module
 
-    {register_graphql, auto_api_blocks} =
+    auto_api_blocks =
       if auto_apis do
-        register =
+        # Run at expansion time so get_env/put_env are not injected into the caller.
+        Dobro.App.Api.Surface.register(:graphql)
+
+        for api_mod <- Dobro.App.Api.Surface.modules_for_surface(:graphql) do
           quote do
-            require Dobro.App.Api.Surface
-            Dobro.App.Api.Surface.register(:graphql)
+            api(unquote(api_mod))
           end
-
-        blocks =
-          for mod <- Dobro.App.Api.Surface.modules_for_surface(:graphql) do
-            quote do
-              api(unquote(mod))
-            end
-          end
-
-        {register, blocks}
+        end
       else
-        {nil, []}
+        []
       end
 
     Module.register_attribute(mod, :referenced_types, accumulate: true)
@@ -46,7 +40,6 @@ defmodule Dobro.Graphql.Schema do
 
       use Absinthe.Schema.Notation
 
-      unquote(register_graphql)
       unquote_splicing(auto_api_blocks)
     end
   end

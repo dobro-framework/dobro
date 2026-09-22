@@ -22,15 +22,23 @@ defmodule Dobro.App.Api.Surface do
     Application.get_env(:dobro, :api_surfaces, [])
   end
 
-  @doc false
-  defmacro register(surface) when is_atom(surface) do
-    quote do
-      surfaces = Application.get_env(:dobro, :api_surfaces, [])
+  @doc """
+  Records a surface atom (e.g. `:graphql`, `:ai`) in application env.
 
-      unless unquote(surface) in surfaces do
-        Application.put_env(:dobro, :api_surfaces, surfaces ++ [unquote(surface)])
-      end
+  Must be a function, not a quoting macro. Expanding `Application.get_env/3`
+  into a consumer module body triggers Elixir's compile_env warning, and
+  `Application.compile_env/3` is unsafe here because this key is also written
+  with `put_env/3`.
+  """
+  @spec register(atom()) :: :ok
+  def register(surface) when is_atom(surface) do
+    surfaces = Application.get_env(:dobro, :api_surfaces, [])
+
+    unless surface in surfaces do
+      Application.put_env(:dobro, :api_surfaces, surfaces ++ [surface])
     end
+
+    :ok
   end
 
   @doc """
