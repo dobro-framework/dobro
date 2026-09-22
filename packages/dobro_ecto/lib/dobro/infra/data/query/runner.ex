@@ -4,7 +4,7 @@ defmodule Dobro.Infra.Data.Query.Runner do
   """
 
   alias Dobro.Infra.Data.Mappings
-  alias Dobro.Infra.Data.Query.{Exists, ListRunner, One}
+  alias Dobro.Infra.Data.Query.{Exists, FacetRunner, ListRunner, One}
 
   @doc """
   Runs `query_module` defined on `repo_module` with `args` and optional context.
@@ -20,6 +20,7 @@ defmodule Dobro.Infra.Data.Query.Runner do
         :one -> One.run(repo_module, spec, args, context)
         :list -> ListRunner.run(repo_module, spec, args, context)
         :exists -> Exists.run(repo_module, spec, args, context)
+        :facet -> FacetRunner.run(repo_module, spec, args, context)
       end
 
     apply_mappings(repo_module, result, spec.type)

@@ -16,6 +16,7 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       :list -> compile_list(repo, schema, root_binding, default_limit, query_fn, block, env, ctx, opts)
       :one -> compile_one(repo, schema, id_field, root_binding, query_fn, block, env, ctx, opts)
       :exists -> compile_exists(repo, schema, id_field, query_fn, block, env, ctx, opts)
+      :facet -> compile_facet(repo, schema, root_binding, query_fn, block, env, ctx, opts)
     end
   end
 
@@ -114,6 +115,53 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     {spec, query_ast, expr_defs}
   end
 
+  defp compile_facet(repo, schema, root_binding, query_fn, block, env, ctx, opts) do
+    {joins, fields, config, query_ast, expr_defs} = compile_block(block, schema, root_binding, env, ctx)
+
+    facets =
+      opts
+      |> Keyword.get(:facets, Keyword.get(config, :facets, []))
+      |> List.wrap()
+      |> MapSet.new()
+
+    if MapSet.size(facets) == 0 do
+      raise ArgumentError,
+            "defquery type: :facet requires facets: [:field, ...] — columns clients may request via args.field"
+    end
+
+    filterable = finalize_queryable(config, :filterable)
+
+    # Register root column sources for facet + filterable fields so filters resolve.
+    fields =
+      facets
+      |> MapSet.union(filterable)
+      |> Enum.reduce(fields, fn name, acc ->
+        Map.put_new(acc, name, {:column, root_binding, name})
+      end)
+
+    query =
+      case query_ast do
+        nil -> nil
+        _ast -> {repo, query_fn, 2}
+      end
+
+    spec = %Spec{
+      module: nil,
+      repo: repo,
+      type: :facet,
+      schema: schema,
+      root_binding: root_binding,
+      fields: fields,
+      joins: joins,
+      filterable: filterable,
+      facets: facets,
+      query: query,
+      include_global: Keyword.get(opts, :include_global)
+    }
+
+    {spec, query_ast, expr_defs}
+  end
+
   def query_function_name(query_name), do: :"__query_#{query_name}__"
 
   def expr_function_name(query_name, field_name), do: :"__expr_#{query_name}_#{field_name}__"
@@ -194,6 +242,9 @@ defmodule Dobro.Infra.Data.Query.Compiler do
 
   defp compile_expression({:sortable, _, [fields_list]}, acc, _, _, _, _),
     do: put_queryable(acc, :sortable, fields_list)
+
+  defp compile_expression({:facets, _, [fields_list]}, acc, _, _, _, _),
+    do: put_config(acc, :facets, List.wrap(fields_list))
 
   defp compile_expression({:default_order, _, [order]}, acc, _, _, _, _),
     do: put_config(acc, :default_order, order)

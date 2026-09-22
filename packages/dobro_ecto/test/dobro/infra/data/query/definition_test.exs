@@ -79,6 +79,44 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
     assert %Dobro.Infra.Data.Query.Spec{type: :exists} = NoBlockExistsRepo.ItemExists.__spec__()
   end
 
+  defmodule FacetPort do
+    use Dobro.Spec.Port
+    @callback get_category_facet_values(map(), term()) :: {:ok, [String.t()]} | {:error, term()}
+  end
+
+  defmodule FacetRepo do
+    import Ecto.Query
+
+    use Dobro.Infra.Data.ReadRepo,
+      port: Dobro.Infra.Data.Query.DefinitionTest.FacetPort,
+      schema: Dobro.Ecto.Test.Schemas.CategorySchema,
+      tenant_strategy: nil
+
+    defquery GetCategoryFacetValues,
+             type: :facet,
+             as: :get_category_facet_values,
+             facets: [:name, :status] do
+      filterable [:status, :tenant_id]
+
+      query fn _args, _ctx ->
+        from(c in schema(), as: :category)
+      end
+    end
+  end
+
+  test "compiles facet queries with facets allow-list and filterable columns" do
+    spec = FacetRepo.GetCategoryFacetValues.__spec__()
+
+    assert spec.type == :facet
+    assert MapSet.equal?(spec.facets, MapSet.new([:name, :status]))
+    assert MapSet.equal?(spec.filterable, MapSet.new([:status, :tenant_id]))
+    assert Map.has_key?(spec.fields, :name)
+    assert Map.has_key?(spec.fields, :status)
+    assert Map.has_key?(spec.fields, :tenant_id)
+    assert spec.query == {FacetRepo, :__query_GetCategoryFacetValues__, 2}
+    assert function_exported?(FacetRepo, :get_category_facet_values, 1)
+  end
+
   test "defaults repo function name from the query module" do
     Code.ensure_loaded!(CategoryReadRepo)
     Code.ensure_loaded!(NoBlockExistsRepo)

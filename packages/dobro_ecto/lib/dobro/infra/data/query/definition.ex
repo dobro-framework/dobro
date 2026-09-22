@@ -42,7 +42,7 @@ defmodule Dobro.Infra.Data.Query.Definition do
 
   Options:
 
-  - `:type` — `:one`, `:list`, or `:exists` (required)
+  - `:type` — `:one`, `:list`, `:exists`, or `:facet` (required)
   - `:as` — repo function name. Defaults to `Macro.underscore` of the query
     module name (`ListCategories` → `:list_categories`); `:exists` queries append
     `?` (`CategoryExists` → `:category_exists?`). Pass an atom to override, or
@@ -50,10 +50,12 @@ defmodule Dobro.Infra.Data.Query.Definition do
   - `:binding` — override root Ecto binding (default: inferred from schema, e.g. `CategorySchema` → `:category`)
   - `:schema` — override schema when not set on `use ReadRepo`
   - `:id_field` — for `:one` queries, the args key used to look up the record (default: `:id`)
-  - `:include_global` — for `:one`, `:list`, and `:exists` queries with a tenant-id strategy, forwarded to the tenant filter
+  - `:include_global` — for `:one`, `:list`, `:exists`, and `:facet` queries with a tenant-id strategy, forwarded to the tenant filter
   - `:default_limit` — default page size for `:list` queries (default: `10`)
   - `:default_order` — default sort when the client omits `order_by`, e.g. `[asc: :id]`
   - `:count` — list total strategy: `:exact` (default), `:estimated` (Postgres planner rows), or `:skip`
+  - `:facets` — for `:facet` queries, allow-list of columns clients may request via `args.field`
+    (returns a sorted distinct string list; no row metadata)
 
   Per-query options override defaults set on `use ReadRepo` via `query_defaults:`.
 

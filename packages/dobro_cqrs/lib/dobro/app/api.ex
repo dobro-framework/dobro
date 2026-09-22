@@ -126,9 +126,10 @@ defmodule Dobro.App.Api do
 
     expanded_message = Macro.expand(query_or_cmd_mod, env)
     result_mod = explicit_result || message_result(expanded_message)
+    result_ast = Macro.escape(result_mod)
 
     route_opts =
-      [returning: returning, result: result_mod, description: description]
+      [returning: returning, result: result_ast, description: description]
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
     run =
@@ -150,7 +151,7 @@ defmodule Dobro.App.Api do
                  args
                ),
              {:ok, casted} <-
-               cast_route_result(unquote(type), result, unquote(returning), unquote(result_mod)) do
+               cast_route_result(unquote(type), result, unquote(returning), unquote(result_ast)) do
           {:ok, casted}
         else
           {:error, pipeline} -> {:error, pipeline}
