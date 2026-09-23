@@ -127,7 +127,14 @@ if Code.ensure_loaded?(Igniter) do
         "config.exs",
         :dobro_runtime,
         [:outbox_relay],
-        [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
+        [
+          enabled: false,
+          batch_size: 100,
+          poll_interval_ms: 1_000,
+          claim_timeout_ms: 300_000,
+          purge_after_ms: nil,
+          purge_interval_ms: 60_000
+        ]
       )
       |> Igniter.Project.Config.configure(
         "config.exs",

@@ -17,7 +17,14 @@ defmodule Dobro.Config do
         actor_lock: {Dobro.Runtime.ActorLock.None, []},
         actor_registry: {Dobro.Runtime.ActorRegistry.Local, []},
         event_consumer_mode: :singleton,
-        outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
+        outbox_relay: [
+          enabled: false,
+          batch_size: 100,
+          poll_interval_ms: 1_000,
+          claim_timeout_ms: 300_000,
+          purge_after_ms: nil,
+          purge_interval_ms: 60_000
+        ]
 
       config :dobro_cqrs,
         execution_strategy: :actor_when_identified,

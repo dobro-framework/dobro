@@ -323,7 +323,14 @@ config :dobro_ecto,
 # Required when using dobro_runtime
 config :dobro_runtime,
   pubsub: MyApp.PubSub,
-  outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
+  outbox_relay: [
+    enabled: false,
+    batch_size: 100,
+    poll_interval_ms: 1_000,
+    claim_timeout_ms: 300_000,
+    purge_after_ms: nil,
+    purge_interval_ms: 60_000
+  ]
 
 # Wire runtime into CQRS (required when using aggregate actors)
 config :dobro_cqrs,

@@ -30,7 +30,14 @@ config :dobro_runtime,
   actor_lock: {Dobro.Runtime.ActorLock.None, []},
   actor_registry: {Dobro.Runtime.ActorRegistry.Local, []},
   event_consumer_mode: :singleton,
-  outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
+  outbox_relay: [
+    enabled: false,
+    batch_size: 100,
+    poll_interval_ms: 1_000,
+    claim_timeout_ms: 300_000,
+    purge_after_ms: nil,
+    purge_interval_ms: 60_000
+  ]
 
 config :dobro_cqrs,
   execution_strategy: :actor_when_identified,
@@ -39,6 +46,16 @@ config :dobro_cqrs,
 ```
 
 Set `event_delivery_strategy: :outbox` and `outbox_relay: [enabled: true, ...]` for transactional outbox delivery via `Dobro.Runtime.OutboxRelay`.
+
+| `outbox_relay` key | Default | Description |
+|--------------------|---------|-------------|
+| `:batch_size` | `100` | Rows claimed per poll |
+| `:poll_interval_ms` | `1_000` | Relay poll interval |
+| `:claim_timeout_ms` | `300_000` | Stale claim reclaim window |
+| `:purge_after_ms` | `nil` | Delete processed rows older than this age (`nil` disables) |
+| `:purge_interval_ms` | `60_000` | Purge schedule when `:purge_after_ms` is set |
+
+Telemetry: `[:dobro, :outbox, :relay]` and `[:dobro, :outbox, :purge]` with `%{count: n}` and `%{result: :ok | :error}`.
 
 ### Clustering / multi-node
 
@@ -155,8 +172,8 @@ The runtime layer does not dictate storage strategy — it orchestrates executio
 |--------|------|
 | `Dobro.Runtime.Command.ExecutionStrategy.Actor` | Actor-based execution for identified commands |
 | `Dobro.Runtime.Command.EventDeliveryStrategy.PubSub` | Post-commit PubSub broadcast |
-| `Dobro.Runtime.Command.EventDeliveryStrategy.Outbox` | Transactional outbox staging |
-| `Dobro.Runtime.OutboxRelay` | Polls outbox and publishes to PubSub |
+| `Dobro.Runtime.Command.EventDeliveryStrategy.Outbox` | Stages via `Dobro.Infra.Data.Outbox`; claim→PubSub→mark |
+| `Dobro.Runtime.OutboxRelay` | Polls outbox, publishes to PubSub, optional purge |
 | `Dobro.Runtime.Persistence` | Aggregate load (WriteRepo or event replay) |
 
 ## Main modules

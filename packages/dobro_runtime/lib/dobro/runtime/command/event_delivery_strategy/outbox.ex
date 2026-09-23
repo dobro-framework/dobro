@@ -1,38 +1,21 @@
 defmodule Dobro.Runtime.Command.EventDeliveryStrategy.Outbox do
   @moduledoc """
   Stages domain events in a transactional outbox for async relay delivery.
+
+  Storage operations live in `Dobro.Infra.Data.Outbox`. This module implements
+  the delivery strategy and PubSub relay: claim → broadcast → mark processed.
   """
 
   @behaviour Dobro.App.Command.EventDeliveryStrategy
 
   alias Dobro.App.DomainEventCodec
-  alias Dobro.Infra.Data.DomainEventOutboxSchema
-  alias Dobro.Infra.Repo
+  alias Dobro.Infra.Data.Outbox
 
   @impl true
   def stage([], _context, _opts), do: :ok
 
   def stage(events, %{aggregate: aggregate}, _opts) do
-    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:microsecond)
-    stream_name = stream_name(aggregate)
-
-    rows =
-      Enum.map(events, fn event ->
-        encoded = DomainEventCodec.encode(event)
-
-        %{
-          id: Ecto.UUID.generate(),
-          stream_name: stream_name,
-          event_payload: encoded,
-          message_identity: encoded["message_identity"],
-          inserted_at: now
-        }
-      end)
-
-    case Repo.insert_all(DomainEventOutboxSchema, rows) do
-      {count, _} when count == length(rows) -> :ok
-      _ -> {:error, :outbox_stage_failed}
-    end
+    Outbox.insert(stream_name(aggregate), events)
   end
 
   @impl true
@@ -42,52 +25,50 @@ defmodule Dobro.Runtime.Command.EventDeliveryStrategy.Outbox do
   def transactional_stage?, do: true
 
   @doc """
-  Publishes staged outbox rows to PubSub and marks them processed.
+  Claims staged outbox rows, publishes to PubSub outside the DB transaction,
+  then marks them processed.
+
+  At-least-once: if the process crashes after publish but before mark, a stale
+  claim timeout allows another relay to republish. Consumers must be idempotent.
 
   Called by `Dobro.Runtime.OutboxRelay`.
   """
-  @spec relay(keyword()) :: :ok | {:error, term()}
+  @spec relay(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
   def relay(opts \\ []) do
-    batch_size = Keyword.get(opts, :batch_size, 100)
     pubsub = Dobro.Config.pubsub!()
+    claim_opts = Keyword.take(opts, [:batch_size, :claim_timeout_ms])
 
-    Dobro.Infra.Repo.transaction(fn ->
-      rows = fetch_batch(batch_size)
+    case Outbox.claim(claim_opts) do
+      {:ok, []} ->
+        {:ok, 0}
 
-      Enum.each(rows, fn row ->
-        event = DomainEventCodec.decode(row.event_payload)
-        Phoenix.PubSub.broadcast(pubsub, row.stream_name, {:event, event})
-      end)
+      {:ok, rows} ->
+        case publish_all(rows, pubsub) do
+          :ok ->
+            case Outbox.mark_processed(rows) do
+              :ok -> {:ok, length(rows)}
+              {:error, _reason} = error -> error
+            end
 
-      mark_processed(rows)
-      :ok
-    end)
-    |> case do
-      {:ok, :ok} -> :ok
-      {:error, error} -> {:error, error}
+          {:error, _reason} = error ->
+            _ = Outbox.release(rows)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp fetch_batch(batch_size) do
-    import Ecto.Query
+  defp publish_all(rows, pubsub) do
+    Enum.reduce_while(rows, :ok, fn row, :ok ->
+      event = DomainEventCodec.decode(row.event_payload)
 
-    DomainEventOutboxSchema
-    |> where([row], is_nil(row.processed_at))
-    |> order_by([row], asc: row.inserted_at, asc: row.id)
-    |> limit(^batch_size)
-    |> lock("FOR UPDATE SKIP LOCKED")
-    |> Repo.all()
-  end
-
-  defp mark_processed(rows) do
-    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:microsecond)
-    ids = Enum.map(rows, & &1.id)
-
-    import Ecto.Query
-
-    DomainEventOutboxSchema
-    |> where([row], row.id in ^ids)
-    |> Repo.update_all(set: [processed_at: now])
+      case Phoenix.PubSub.broadcast(pubsub, row.stream_name, {:event, event}) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp stream_name(%_{} = aggregate), do: stream_name(aggregate.__struct__)

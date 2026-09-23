@@ -280,17 +280,18 @@ High. The stack already has:
 
 ```elixir
 # domain_event_outbox table
-# id, stream_name, event_payload, message_identity, inserted_at, processed_at
+# id, stream_name, event_payload, message_identity, inserted_at, claimed_at, processed_at
 EventDeliveryStrategy.Outbox.stage(events, %{aggregate: aggregate, tenant: tenant})
+# → Dobro.Infra.Data.Outbox.insert/2
 ```
 
 **Phase 2 — async relay** (Oban worker or dedicated GenServer):
 
 ```elixir
 EventDeliveryStrategy.Outbox.relay(batch_size: 100)
-# SELECT ... FOR UPDATE SKIP LOCKED
-# PubSub.broadcast(stream, {:event, event})
-# UPDATE processed_at
+# claim: SELECT ... FOR UPDATE SKIP LOCKED; SET claimed_at (short txn)
+# PubSub.broadcast(stream, {:event, event})   # outside txn
+# mark_processed / release on failure
 ```
 
 ### Why a delivery strategy, not persistence
@@ -309,7 +310,11 @@ Recommendation: Oban worker in host app initially; optional `Dobro.Runtime.Outbo
 
 ### Ordering
 
-Relay should publish in `inserted_at` order per `stream_name` when ordering matters. Consumers remain idempotent (at-least-once).
+Relay should publish in `inserted_at` order per `stream_name` when ordering matters. Consumers remain idempotent (at-least-once). Stale `claimed_at` values older than `claim_timeout_ms` are reclaimable after a crash mid-publish.
+
+### Purge
+
+`Dobro.Runtime.OutboxRelay` can delete processed rows when `purge_after_ms` is set (see `outbox_relay` config). Storage helpers live in `Dobro.Infra.Data.Outbox`.
 
 ---
 
@@ -363,6 +368,7 @@ dobro_ecto/
       persist.ex                          # stateful aggregate snapshot writes
       operation.ex                        # :insert | :update | :delete resolution
     domain_event_outbox_schema.ex
+    outbox.ex                             # insert / claim / mark / release / purge
   lib/dobro/app/
     event_store.ex
 
@@ -372,9 +378,9 @@ dobro_runtime/
       actor.ex
     event_delivery_strategy/
       pubsub.ex
-      outbox.ex                           # stage/2 in transaction
+      outbox.ex                           # stage via Infra.Data.Outbox; claim→publish→mark
   lib/dobro/runtime/
-    outbox_relay.ex                       # optional supervised GenServer
+    outbox_relay.ex                       # optional supervised GenServer (+ purge)
 ```
 
 ---

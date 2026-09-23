@@ -79,6 +79,7 @@ Command handler (dobro_cqrs)
       → WriteRepo.Persist (stateful) or EventStore.append (event-sourced)
       → EventEnrichment (stateful path)
   → Event delivery strategy (none, pubsub, or outbox)
+      → Outbox staging uses `Dobro.Infra.Data.Outbox` (same package)
 ```
 
 ---
@@ -398,6 +399,17 @@ end
 ```
 
 Used by aggregate actors and command handlers for identity resolution.
+
+---
+
+## Transactional outbox
+
+`Dobro.Infra.Data.Outbox` owns insert / claim / mark / release / purge against
+`domain_event_outbox` (`Dobro.Infra.Data.DomainEventOutboxSchema`, prefix `shared`).
+
+Host migrations should include `claimed_at` (nullable timestamptz/usec) alongside
+`processed_at`. Relay (`dobro_runtime`) claims with `FOR UPDATE SKIP LOCKED`,
+publishes outside the transaction, then marks processed.
 
 ---
 

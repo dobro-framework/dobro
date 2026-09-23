@@ -96,7 +96,14 @@ config :dobro_cqrs,
 
 config :dobro_runtime,
   pubsub: MyApp.PubSub,
-  outbox_relay: [enabled: false, batch_size: 100, poll_interval_ms: 1_000]
+  outbox_relay: [
+    enabled: false,
+    batch_size: 100,
+    poll_interval_ms: 1_000,
+    claim_timeout_ms: 300_000,
+    purge_after_ms: nil,
+    purge_interval_ms: 60_000
+  ]
 ```
 
 Per-handler and per-handle overrides are supported — see [Command Strategies RFC](command-strategies.html).
