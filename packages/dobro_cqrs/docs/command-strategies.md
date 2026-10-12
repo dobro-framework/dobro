@@ -316,6 +316,8 @@ Relay should publish in `inserted_at` order per `stream_name` when ordering matt
 
 `Dobro.Runtime.OutboxRelay` can delete processed rows when `purge_after_ms` is set (see `outbox_relay` config). Storage helpers live in `Dobro.Infra.Data.Outbox`.
 
+Cross-app publication (Elixir ↔ Rails, S3 audit, timeline projections) is **not** this outbox — see [integration-events.md](integration-events.md).
+
 ---
 
 ## Compile-time enforcement

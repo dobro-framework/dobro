@@ -98,6 +98,7 @@ defmodule Dobro.AI.JsonSchema do
   defp primitive_schema(:boolean), do: %{"type" => "boolean"}
   defp primitive_schema(:datetime), do: %{"type" => "string", "format" => "date-time"}
   defp primitive_schema(:map), do: %{"type" => "object"}
+  defp primitive_schema(:any), do: %{}
   defp primitive_schema(:id), do: %{"type" => "integer"}
   defp primitive_schema(:upload), do: %{"type" => "string"}
   defp primitive_schema(_), do: %{"type" => "string"}

@@ -100,11 +100,13 @@ defmodule Dobro.Domain.EventDefinition do
   end
 
   @doc """
-  Macro for defining an event payload
+  Macro for defining an event payload.
+
+  Accepts the same options as `defcontract`, including `extends:`.
   """
-  defmacro payload(do: block) do
+  defmacro payload(opts \\ [], do: block) do
     quote do
-      defcontract Payload do
+      defcontract Payload, unquote(opts) do
         unquote(block)
       end
 

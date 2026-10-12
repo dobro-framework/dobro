@@ -1,6 +1,6 @@
 defmodule Dobro.Schema.Types do
   @moduledoc """
-  Primitive Schema types
+  Built-in primitive schema types implementing `Dobro.Schema.Type`.
   """
 
   alias Dobro.Schema.Types
@@ -11,6 +11,7 @@ defmodule Dobro.Schema.Types do
     float: Types.Float,
     datetime: Types.DateTime,
     map: Types.Map,
+    any: Types.Any,
     id: Types.Integer,
     boolean: Types.Boolean,
     upload: Types.Upload
@@ -31,10 +32,14 @@ defmodule Dobro.Schema.Types do
     String type
     """
 
+    @behaviour Dobro.Schema.Type
+
     @compile {:no_warn_undefined, [ExPhoneNumber]}
 
+    @impl true
     def new(value), do: to_string(value)
 
+    @impl true
     def validate(value, :presence) when value == "",
       do: {:error, :required}
 
@@ -62,6 +67,8 @@ defmodule Dobro.Schema.Types do
         else: {:error, :invalid_length}
     end
 
+    def validate(_value, _validator), do: :ok
+
     defp validate_phone_number(value) do
       case ExPhoneNumber.parse(value, "") do
         {:ok, parsed} ->
@@ -85,6 +92,10 @@ defmodule Dobro.Schema.Types do
     @moduledoc """
     Integer type
     """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
     def new(value) when is_integer(value), do: value
 
     def new(value) do
@@ -94,6 +105,7 @@ defmodule Dobro.Schema.Types do
       end
     end
 
+    @impl true
     def validate(_value, _validator), do: :ok
   end
 
@@ -101,9 +113,14 @@ defmodule Dobro.Schema.Types do
     @moduledoc """
     Boolean type
     """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
     def new(value) when is_boolean(value), do: value
     def new(_), do: nil
 
+    @impl true
     def validate(_value, _validator), do: :ok
   end
 
@@ -111,6 +128,10 @@ defmodule Dobro.Schema.Types do
     @moduledoc """
     Float type
     """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
     @spec new(binary()) :: nil | float()
     def new(value) do
       case Elixir.Float.parse(value) do
@@ -119,6 +140,7 @@ defmodule Dobro.Schema.Types do
       end
     end
 
+    @impl true
     def validate(_value, _validator), do: :ok
   end
 
@@ -126,17 +148,45 @@ defmodule Dobro.Schema.Types do
     @moduledoc """
     Map type
     """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
     def new(value) when is_map(value), do: value
     def new(_), do: %{}
 
+    @impl true
     def validate(value, :presence) when is_map(value) and map_size(value) > 0, do: :ok
     def validate(_, :presence), do: {:error, :required}
+    def validate(_value, _validator), do: :ok
+  end
+
+  defmodule Any do
+    @moduledoc """
+    Opaque value of any shape (scalar, list, or map).
+
+    Prefer `:any` over `:map` when the value is not structurally a map
+    (e.g. dependency predicate values, untyped AttrJson bags). Transports
+    may encode this as JSON (e.g. GraphQL `Json` scalar).
+    """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
+    def new(value), do: value
+
+    @impl true
+    def validate(nil, :presence), do: {:error, :required}
+    def validate(_, :presence), do: :ok
+    def validate(_value, _validator), do: :ok
   end
 
   defmodule DateTime do
     @moduledoc """
     DateTime type
     """
+
+    @behaviour Dobro.Schema.Type
 
     @compile {:no_warn_undefined, [Timex]}
 
@@ -146,6 +196,7 @@ defmodule Dobro.Schema.Types do
       "{D}/{M}/{YYYY} {h24}:{m}"
     ]
 
+    @impl true
     def new(nil), do: nil
 
     def new(%Elixir.DateTime{} = value), do: value
@@ -164,6 +215,7 @@ defmodule Dobro.Schema.Types do
 
     def new(_), do: nil
 
+    @impl true
     def validate(_value, _validator), do: :ok
 
     defp parse_with_timex(value) do
@@ -206,9 +258,15 @@ defmodule Dobro.Schema.Types do
     @moduledoc """
     Upload type - maps from Plug.Upload
     """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
     def new(%Plug.Upload{} = value), do: value
     def new(_), do: nil
 
+    @impl true
     def validate(_value, _validator), do: :ok
   end
 end
+

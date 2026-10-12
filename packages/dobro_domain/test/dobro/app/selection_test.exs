@@ -3,12 +3,21 @@ defmodule Dobro.App.SelectionTest do
 
   alias Dobro.App.Selection
 
+  defmodule Kind do
+    use Dobro.Enum
+
+    defenum Values do
+      value(:create_resource)
+      value(:send_notification)
+    end
+  end
+
   defmodule MappingField do
     use Dobro.Schema
 
     schema do
-      field :from, list_of(:string)
-      field :to, :string
+      field(:from, list_of(:string))
+      field(:to, :string)
     end
   end
 
@@ -16,9 +25,10 @@ defmodule Dobro.App.SelectionTest do
     use Dobro.Schema
 
     schema do
-      field :id, :id
-      field :name, :string
-      field :fields, list_of(MappingField)
+      field(:id, :id)
+      field(:name, :string)
+      field(:kind, Kind.Values)
+      field(:fields, list_of(MappingField))
     end
   end
 
@@ -37,5 +47,14 @@ defmodule Dobro.App.SelectionTest do
     selection = Selection.from_projection(projected, Mapping)
 
     assert MapSet.equal?(selection.fields, MapSet.new([:name]))
+  end
+
+  test "includes enum fields when selected as leaves" do
+    projected = %{id: :leaf, kind: :leaf, name: :leaf}
+
+    selection = Selection.from_projection(projected, Mapping)
+
+    assert MapSet.member?(selection.fields, :kind)
+    refute Map.has_key?(selection.associations, :kind)
   end
 end

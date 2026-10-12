@@ -11,11 +11,11 @@ defmodule Dobro.App.Selection do
   alias Dobro.Schema.{ListOf, Types}
 
   typedstruct do
-    field :fields, MapSet.t(), default: MapSet.new()
-    field :associations, %{optional(atom()) => t()}, default: %{}
+    field(:fields, MapSet.t(), default: MapSet.new())
+    field(:associations, %{optional(atom()) => t()}, default: %{})
     # Pagination meta fields requested by GraphQL. Empty does not skip COUNT —
     # list queries always compute total_count unless spec.count is :skip.
-    field :meta_fields, MapSet.t(), default: MapSet.new()
+    field(:meta_fields, MapSet.t(), default: MapSet.new())
   end
 
   @doc "True when a GraphQL list selection requested total_count or total_pages."
@@ -87,6 +87,20 @@ defmodule Dobro.App.Selection do
   end
 
   defp association_type?(%ListOf{}), do: false
-  defp association_type?(type) when is_atom(type), do: not Types.type_exists?(type)
+
+  defp association_type?(type) when is_atom(type) do
+    cond do
+      Types.type_exists?(type) -> false
+      # Enums are leaf scalars; without this they look like unknown modules and are
+      # dropped when GraphQL selects them as leaves (breaking OneOfBy controllers).
+      enum_type?(type) -> false
+      true -> true
+    end
+  end
+
   defp association_type?(_), do: false
+
+  defp enum_type?(type) do
+    match?({:module, _}, Code.ensure_loaded(type)) and Dobro.Enum.enum?(type)
+  end
 end

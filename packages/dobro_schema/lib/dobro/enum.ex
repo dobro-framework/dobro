@@ -27,7 +27,8 @@ defmodule Dobro.Enum do
   @doc "Returns true when `module` was defined with `defenum`."
   @spec enum?(term()) :: boolean()
   def enum?(module) when is_atom(module) do
-    Code.ensure_loaded?(module) and function_exported?(module, :__enum__?, 0) and
+    match?({:module, _}, Code.ensure_compiled(module)) and
+      function_exported?(module, :__enum__?, 0) and
       module.__enum__?()
   end
 
@@ -132,6 +133,12 @@ defmodule Dobro.Enum do
       @doc "Alias for `cast/1` used when hydrating persisted values."
       @spec load(term()) :: {:ok, atom()} | {:error, [Dobro.Error.t()]}
       def load(value), do: cast(value)
+
+      @doc "Dumps an enumeration atom to a string for persistence / AttrJson."
+      @spec dump(term()) :: String.t() | nil
+      def dump(nil), do: nil
+      def dump(value) when is_atom(value) and value in @values, do: Atom.to_string(value)
+      def dump(value) when is_binary(value), do: value
     end
   end
 

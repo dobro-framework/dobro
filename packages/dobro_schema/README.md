@@ -48,9 +48,9 @@ end
 
 | Category | Types |
 |----------|-------|
-| Primitives | `:string`, `:integer`, `:float`, `:boolean`, `:datetime`, `:map`, `:id` |
+| Primitives | `:string`, `:integer`, `:float`, `:boolean`, `:datetime`, `:map`, `:any`, `:id` |
 | Composites | `list_of/1`, `non_null/1`, `one_of/2` |
-| Custom | Any module implementing the schema type protocol |
+| Custom | Any module implementing `Dobro.Schema.Type` (`new/1`, `validate/2`) |
 
 ### Validation
 

@@ -43,16 +43,51 @@ defmodule Dobro.Domain.Aggregate do
 
   defmodule StateMacros do
     @moduledoc """
-    Macros for defining state
+    Macros for defining state.
+
+    Accepts `extends:` (same semantics as `Dobro.Schema.schema/2`). Extended
+    fields are inserted after `:version` and before the `state` block so the
+    aggregate version field stays first.
     """
-    defmacro state(do: block) do
+    defmacro state(opts \\ [], do: block) do
+      {extends, schema_opts} = Keyword.pop(opts, :extends)
+
+      except =
+        block
+        |> block_expressions()
+        |> Enum.flat_map(fn
+          {:field, _, [name | _]} when is_atom(name) -> [name]
+          _ -> []
+        end)
+
+      body =
+        case extends do
+          nil ->
+            quote do
+              field :version, :integer, required: true
+              unquote(block)
+            end
+
+          ast ->
+            parent = Dobro.Schema.resolve_schema_module(ast, __CALLER__)
+
+            quote do
+              field :version, :integer, required: true
+              extend(unquote(parent), except: unquote(except))
+              unquote(block)
+            end
+        end
+
       quote do
-        schema do
-          field :version, :integer, required: true
-          unquote(block)
+        schema unquote(schema_opts) do
+          unquote(body)
         end
       end
     end
+
+    defp block_expressions({:__block__, _, expressions}), do: expressions
+    defp block_expressions(nil), do: []
+    defp block_expressions(expression), do: [expression]
   end
 
   defmodule EventMacros do

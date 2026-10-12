@@ -129,6 +129,8 @@ After a successful write, domain events can be:
 - **Published to PubSub** — `event_delivery_strategy: :pubsub` broadcasts enriched events on a stream named after the aggregate (`AggregateModule.__stream_name__/0`), where event handlers and projectors subscribe.
 - **Staged via outbox** — `event_delivery_strategy: :outbox` inserts outbox rows in the same transaction; `Dobro.Runtime.OutboxRelay` publishes to PubSub asynchronously.
 
+**Cross-app facts** (Elixir ↔ Rails, timelines, S3 audit) use a separate **integration events** log — not domain PubSub. See [`dobro_cqrs/docs/integration-events.md`](dobro_cqrs/docs/integration-events.md).
+
 Both storage strategies integrate with the same handler and projection interfaces.
 
 ## End-to-end walkthrough

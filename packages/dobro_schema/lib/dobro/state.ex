@@ -3,7 +3,7 @@ defmodule Dobro.State do
   Provides a pipeline for managing state
   """
   alias Dobro.Error
-  alias Dobro.Schema.{ListOf, NonNull, OneOf, Types, Validations}
+  alias Dobro.Schema.{ListOf, NonNull, OneOf, OneOfBy, OneOfInput, Types, Validations}
   import Dobro.Pipeline
   # @todo: move to domain layer
   alias Dobro.Schema.DomainValue
@@ -132,22 +132,218 @@ defmodule Dobro.State do
         %{} = pipeline,
         value,
         field,
-        %OneOf{of_types: of_types, discr_fn: discr_fn},
+        %OneOf{of_types: of_types, discr_fn: discr_fn} = one_of,
         opts
       ) do
-    of_type = discr_fn.(value)
+    apply_one_of(pipeline, value, field, one_of, of_types, discr_fn, opts)
+  end
 
-    if Enum.member?(of_types, of_type) do
-      cast_field_value(pipeline, of_type, value, field, opts)
-    else
-      error = Error.new(:could_not_assign, path: field)
-      add_error(pipeline, error)
+  def apply_field_value(%{} = pipeline, value, field, %OneOfBy{} = one_of_by, opts) do
+    apply_one_of_by(pipeline, value, field, one_of_by, opts)
+  end
+
+  def apply_field_value(%{} = pipeline, value, field, %OneOfInput{} = one_of_input, opts) do
+    # Legacy keyed schema type: store the unwrapped cast member.
+    apply_keyed_one_of(pipeline, value, field, one_of_input.variants, opts)
+  end
+
+  def apply_field_value(%{} = pipeline, value, field, type, opts)
+      when is_atom(type) and not is_nil(type) do
+    cond do
+      OneOf.one_of?(type) ->
+        %OneOf{of_types: of_types, discr_fn: discr_fn} = one_of = type.__one_of__()
+        apply_one_of(pipeline, value, field, one_of, of_types, discr_fn, opts)
+
+      OneOfBy.one_of_by?(type) ->
+        apply_one_of_by(pipeline, value, field, type.__one_of_by__(), opts)
+
+      one_of_input_module?(type) ->
+        apply_keyed_one_of(pipeline, value, field, type.__one_of_input__().variants, opts)
+
+      true ->
+        cast_field_value(pipeline, type, value, field, opts)
     end
   end
 
   def apply_field_value(%{} = pipeline, value, field, type, opts) do
     cast_field_value(pipeline, type, value, field, opts)
   end
+
+  # Keyed exclusive envelope (e.g. GraphQL @oneOf) first; otherwise discr_fn.
+  defp apply_one_of(pipeline, value, field, _one_of, of_types, discr_fn, opts) do
+    variants = OneOf.keyed_variants(of_types)
+
+    case OneOfInput.unwrap(OneOfInput.new(variants), value) do
+      {:ok, {_name, variant_value}} ->
+        cast_discriminated_member(pipeline, variant_value, field, of_types, discr_fn, opts)
+
+      {:error, :one_of_exclusive} ->
+        add_error(
+          pipeline,
+          Error.new(:one_of_exclusive,
+            path: field,
+            description: "#{field} allows exactly one variant"
+          )
+        )
+
+      {:error, :one_of_required} ->
+        cast_discriminated_member(pipeline, value, field, of_types, discr_fn, opts)
+    end
+  end
+
+  # Sibling-field discr: unwrap keyed envelope for payload, resolve member via parent.
+  defp apply_one_of_by(pipeline, value, field, %OneOfBy{} = one_of_by, opts) do
+    variants = OneOfBy.keyed_variants(one_of_by)
+    parent = parent_for_one_of_by(pipeline)
+
+    case OneOfInput.unwrap(OneOfInput.new(variants), value) do
+      {:ok, {_name, variant_value}} ->
+        cast_one_of_by_member(pipeline, variant_value, field, one_of_by, parent, opts)
+
+      {:error, :one_of_exclusive} ->
+        add_error(
+          pipeline,
+          Error.new(:one_of_exclusive,
+            path: field,
+            description: "#{field} allows exactly one variant"
+          )
+        )
+
+      {:error, :one_of_required} ->
+        cast_one_of_by_member(pipeline, value, field, one_of_by, parent, opts)
+    end
+  end
+
+  # Prefer already-cast state values; keep input for not-yet-assigned (nil) siblings
+  # so controller fields declared before this OneOfBy still resolve during assign_all.
+  defp parent_for_one_of_by(pipeline) do
+    input = pipeline.input || %{}
+    state = pipeline.state.value || %{}
+
+    Map.merge(input, Map.reject(state, fn {_key, value} -> is_nil(value) end))
+  end
+
+  defp cast_one_of_by_member(pipeline, value, field, one_of_by, parent, opts) do
+    case OneOfBy.resolve_member(one_of_by, parent) do
+      {:ok, of_type} ->
+        cast_field_value(pipeline, of_type, value, field, opts)
+
+      {:error, _} ->
+        add_error(
+          pipeline,
+          Error.new(:could_not_assign,
+            path: field,
+            description: "#{field} could not resolve member from #{one_of_by.controller_field}"
+          )
+        )
+    end
+  end
+
+  defp cast_discriminated_member(pipeline, value, field, of_types, discr_fn, opts) do
+    of_type = discr_fn.(value)
+
+    if Enum.member?(of_types, of_type) do
+      cast_field_value(pipeline, of_type, value, field, opts)
+    else
+      apply_keyed_one_of(pipeline, value, field, OneOf.keyed_variants(of_types), opts)
+    end
+  end
+
+  defp apply_keyed_one_of(pipeline, value, field, variants, opts) do
+    case unwrap_or_resolve_member(variants, value) do
+      {:ok, {_name, variant_type, variant_value}} ->
+        case cast_one_of_variant(variant_type, variant_value) do
+          {:ok, casted} ->
+            put_in(pipeline.state.value, Map.put(pipeline.state.value, field, casted))
+
+          {:error, errors} when is_list(errors) ->
+            merge_accumulated_errors(pipeline, field, opts, errors)
+
+          {:error, reason} ->
+            add_error(
+              pipeline,
+              Error.new(reason, path: field, description: "invalid one_of variant")
+            )
+        end
+
+      {:error, :one_of_required} ->
+        if Keyword.get(opts, :required, false) do
+          add_error(
+            pipeline,
+            Error.new(:required, path: field, description: "#{field} requires exactly one variant")
+          )
+        else
+          pipeline
+        end
+
+      {:error, :one_of_exclusive} ->
+        add_error(
+          pipeline,
+          Error.new(:one_of_exclusive,
+            path: field,
+            description: "#{field} allows exactly one variant"
+          )
+        )
+
+      {:error, :could_not_assign} ->
+        add_error(pipeline, Error.new(:could_not_assign, path: field))
+    end
+  end
+
+  defp unwrap_or_resolve_member(variants, value) do
+    case OneOfInput.unwrap(OneOfInput.new(variants), value) do
+      {:ok, {name, variant_value}} ->
+        {:ok, {name, Keyword.fetch!(variants, name), variant_value}}
+
+      {:error, :one_of_exclusive} = err ->
+        err
+
+      {:error, :one_of_required} ->
+        resolve_untagged_member(variants, value)
+    end
+  end
+
+  defp resolve_untagged_member(variants, %{__struct__: mod} = value) do
+    case Enum.find(variants, fn {_name, type} -> type == mod end) do
+      {name, type} -> {:ok, {name, type, value}}
+      nil -> {:error, :could_not_assign}
+    end
+  end
+
+  defp resolve_untagged_member(variants, value) when is_map(value) do
+    variants
+    |> Enum.find_value(fn {name, type} ->
+      case cast_one_of_variant(type, value) do
+        {:ok, casted} -> {:ok, {name, type, casted}}
+        _ -> nil
+      end
+    end)
+    |> case do
+      {:ok, _} = ok -> ok
+      nil -> {:error, :one_of_required}
+    end
+  end
+
+  defp resolve_untagged_member(_variants, _), do: {:error, :one_of_required}
+
+  defp one_of_input_module?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :__one_of_input__, 0)
+  end
+
+  defp cast_one_of_variant(type, value) when is_atom(type) do
+    cond do
+      Types.type_exists?(type) ->
+        {:ok, Types.type_module(type).new(value)}
+
+      function_exported?(type, :new, 1) ->
+        type.new(value)
+
+      true ->
+        {:ok, value}
+    end
+  end
+
+  defp cast_one_of_variant(_type, value), do: {:ok, value}
 
   def cast_field_value(%{} = pipeline, type, value, field, opts) do
     if Types.type_exists?(type) do
@@ -330,7 +526,9 @@ defmodule Dobro.State do
   end
 
   defp hydrate_input_field(pipeline, field, type) do
-    case DomainValue.load(Map.get(pipeline.input, field), type) do
+    parent = parent_for_one_of_by(pipeline)
+
+    case DomainValue.load(Map.get(pipeline.input, field), type, parent) do
       {:ok, value} ->
         put_in(pipeline.state.value, Map.put(pipeline.state.value, field, value))
 

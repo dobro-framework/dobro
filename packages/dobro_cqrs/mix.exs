@@ -54,7 +54,7 @@ defmodule DobroCqrs.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "docs/command-strategies.md"],
+      extras: ["README.md", "docs/command-strategies.md", "docs/integration-events.md"],
       source_ref: "v#{@version}",
       source_url: "#{@source_url}/tree/main/packages/dobro_cqrs"
     ]

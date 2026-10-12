@@ -15,6 +15,7 @@ defmodule Dobro.Infra.Data.Mapper do
     quote do
       import Dobro.Schema.DomainValue
       alias Dobro.App.DataTransfer.DTO
+      alias Dobro.Schema.{ListOf, NonNull, OneOf, OneOfBy}
 
       @doc """
       Converts a data transfer object (DTO) to a domain aggregate.
@@ -31,8 +32,10 @@ defmodule Dobro.Infra.Data.Mapper do
         fields =
           aggregate_module.__schema__()
           |> Enum.reduce_while({:ok, initial}, fn {key, {type, _opts}}, {:ok, acc} ->
+            parent = Map.merge(dto, acc)
+
             with {:ok, value} <- apply(__MODULE__, :get_from_dto, [dto, key]),
-                 value <- load!(value, type),
+                 value <- load!(value, type, parent),
                  {:ok, acc} <- apply(__MODULE__, :put_in_domain, [acc, key, value]) do
               {:cont, {:ok, acc}}
             else
@@ -73,8 +76,45 @@ defmodule Dobro.Infra.Data.Mapper do
         {:ok, Map.get(domain, key)}
       end
 
-      @spec dto_for(term()) :: {:ok, term()} | {:error, term()}
-      defp dto_for(value), do: {:ok, DTO.to_dto(value)}
+      defp dto_for(value, type), do: {:ok, dump_for_type(value, type)}
+
+      defp dump_for_type(nil, _type), do: nil
+
+      defp dump_for_type(value, %ListOf{of_type: of_type}) when is_list(value) do
+        Enum.map(value, &dump_for_type(&1, of_type))
+      end
+
+      defp dump_for_type(value, %NonNull{of_type: of_type}) do
+        dump_for_type(value, of_type)
+      end
+
+      defp dump_for_type(value, type) when is_atom(type) do
+        cond do
+          Dobro.Enum.enum?(type) ->
+            type.dump(value)
+
+          (OneOf.one_of?(type) or OneOfBy.one_of_by?(type)) and function_exported?(type, :dump, 1) ->
+            type.dump(value)
+
+          function_exported?(type, :dump, 1) and is_struct(value, type) ->
+            type.dump(value)
+
+          true ->
+            dump_struct_or_dto(value)
+        end
+      end
+
+      defp dump_for_type(value, _type), do: dump_struct_or_dto(value)
+
+      defp dump_struct_or_dto(%{__struct__: mod} = value) do
+        if function_exported?(mod, :dump, 1) do
+          mod.dump(value)
+        else
+          DTO.to_dto(value)
+        end
+      end
+
+      defp dump_struct_or_dto(value), do: DTO.to_dto(value)
 
       @doc """
       Converts an aggregate to an Ecto changeset using the provided schema module.
@@ -84,9 +124,9 @@ defmodule Dobro.Infra.Data.Mapper do
 
         fields =
           aggregate.__struct__.__schema__()
-          |> Enum.reduce_while({:ok, initial}, fn {key, {_type, _opts}}, {:ok, acc} ->
+          |> Enum.reduce_while({:ok, initial}, fn {key, {type, _opts}}, {:ok, acc} ->
             with {:ok, value} <- apply(__MODULE__, :get_from_domain, [aggregate, key]),
-                 {:ok, value} <- dto_for(value),
+                 {:ok, value} <- dto_for(value, type),
                  {:ok, acc} <- apply(__MODULE__, :put_in_dto, [acc, key, value]) do
               {:cont, {:ok, acc}}
             else

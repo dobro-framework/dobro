@@ -8,7 +8,7 @@ defmodule Dobro.Graphql.Schema do
 
   alias Dobro.Graphql.Helpers.{Errors, Mutation}
   alias Dobro.Graphql.Schema.MutationBuilder
-  alias Dobro.Schema.Types
+  alias Dobro.Schema.{OneOf, OneOfBy, OneOfInput, Types}
   use Absinthe.Schema.Notation
 
   defmacro __using__(opts \\ []) do
@@ -78,11 +78,14 @@ defmodule Dobro.Graphql.Schema do
     api_modules = Module.get_attribute(env.module, :api_modules)
     context_map = context_map_for(api_modules)
 
-    referenced_types = Module.get_attribute(env.module, :referenced_types) |> Enum.uniq()
+    referenced_types =
+      env.module
+      |> Module.get_attribute(:referenced_types)
+      |> Enum.uniq()
+      |> dedupe_referenced_types()
 
     type_blocks =
-      referenced_types
-      |> Enum.map(fn {type_mod, gql_type} ->
+      Enum.map(referenced_types, fn {type_mod, gql_type} ->
         build_type(env.module, type_mod, context_map: context_map, gql_type: gql_type)
       end)
 
@@ -91,6 +94,36 @@ defmodule Dobro.Graphql.Schema do
 
       def __referenced_types__, do: @referenced_types
     end
+  end
+
+  # Drop plain :result/:input registrations when a specialized :union/:enum/
+  # :union_input/:one_of_input entry exists for the same module. Keep both
+  # :input and :result when both are needed (they generate distinct Absinthe types).
+  defp dedupe_referenced_types(referenced_types) do
+    specialized_keys =
+      referenced_types
+      |> Enum.filter(fn
+        {{:one_of_input, _, _}, :one_of_input} -> true
+        {_, gql} when gql in [:union, :union_input, :enum] -> true
+        _ -> false
+      end)
+      |> MapSet.new(fn
+        {{:one_of_input, type_name, _}, _} -> {:one_of_input, type_name}
+        {type_mod, _} -> type_mod
+      end)
+
+    referenced_types
+    |> Enum.reject(fn
+      {{:one_of_input, type_name, _}, gql} when gql in [:result, :input] ->
+        MapSet.member?(specialized_keys, {:one_of_input, type_name})
+
+      {type_mod, gql} when gql in [:result, :input] ->
+        MapSet.member?(specialized_keys, type_mod)
+
+      _ ->
+        false
+    end)
+    |> Enum.uniq()
   end
 
   def namespace_for(module_or_atom, context_map) do
@@ -148,15 +181,54 @@ defmodule Dobro.Graphql.Schema do
     end
   end
 
+  def type_from_schema(mod, %OneOfInput{variants: variants} = one_of_input, context_map, gql_type) do
+    unless gql_type == :input do
+      raise ArgumentError,
+            "one_of_input/1 is only supported for GraphQL inputs, got: #{inspect(gql_type)}"
+    end
+
+    one_of_input_type_from_schema(mod, one_of_input, variants, context_map)
+  end
+
+  def type_from_schema(mod, %Dobro.Schema.OneOf{of_types: of_types}, context_map, :input) do
+    variants = Enum.map(of_types, fn type -> {OneOf.member_key(type), type} end)
+    one_of_input_type_from_schema(mod, OneOfInput.new(variants), variants, context_map)
+  end
+
+  def type_from_schema(_mod, %Dobro.Schema.OneOf{}, _context_map, gql_type) do
+    raise ArgumentError,
+          "inline one_of/2 is only supported for GraphQL inputs (use a named Dobro.Schema.OneOf module for results), got: #{inspect(gql_type)}"
+  end
+
+  def type_from_schema(mod, %Dobro.Schema.OneOfBy{of_types: of_types}, context_map, :input) do
+    variants = Enum.map(of_types, fn type -> {OneOf.member_key(type), type} end)
+    one_of_input_type_from_schema(mod, OneOfInput.new(variants), variants, context_map)
+  end
+
+  def type_from_schema(_mod, %Dobro.Schema.OneOfBy{}, _context_map, gql_type) do
+    raise ArgumentError,
+          "inline OneOfBy is only supported for GraphQL inputs (use a named Dobro.Schema.OneOfBy module for results), got: #{inspect(gql_type)}"
+  end
+
   def type_from_schema(_, :map, _, _), do: :json
+  def type_from_schema(_, :any, _, _), do: :json
 
   def type_from_schema(mod, type, context_map, gql_type) when is_atom(type) do
     cond do
       type in Types.types() ->
         type
 
+      json_scalar_module?(type) ->
+        :json
+
       Dobro.Enum.enum?(type) ->
         enum_type_from_schema(mod, type, context_map)
+
+      OneOf.one_of?(type) or OneOfBy.one_of_by?(type) ->
+        union_type_from_schema(mod, type, context_map, gql_type)
+
+      one_of_input_module?(type) ->
+        type_from_schema(mod, type.__one_of_input__(), context_map, gql_type)
 
       true ->
         module_type_from_schema(mod, type, context_map, gql_type)
@@ -167,26 +239,134 @@ defmodule Dobro.Graphql.Schema do
     raise ArgumentError, "unsupported GraphQL schema type: #{inspect(type)}"
   end
 
+  # Modules that intentionally map to the Absinthe JSON scalar (opaque JSON values).
+  defp json_scalar_module?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :__graphql_json__, 0) and
+      module.__graphql_json__()
+  end
+
+  defp one_of_input_module?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :__one_of_input__, 0)
+  end
+
   defp enum_type_from_schema(mod, type, context_map) do
-    Module.put_attribute(mod, :referenced_types, {type, :enum})
+    remember_referenced_type(mod, {type, :enum})
     type_namespace = namespace_for(type, context_map)
     name_for([type_namespace, name_from_module(type)])
+  end
+
+  defp union_type_from_schema(mod, type, context_map, :result) do
+    remember_referenced_type(mod, {type, :union})
+
+    Enum.each(union_member_types(type), fn member ->
+      _ = module_type_from_schema(mod, member, context_map, :result)
+    end)
+
+    type_namespace = namespace_for(type, context_map)
+    name_for([type_namespace, name_from_module(type)])
+  end
+
+  defp union_type_from_schema(mod, type, context_map, :input) do
+    # Input-position one_ofs are encoded as GraphQL `@oneOf` input objects.
+    if type_already_referenced?(mod, type, :union_input) do
+      type_namespace = namespace_for(type, context_map)
+      name_for([type_namespace, name_from_module(type), "input"])
+    else
+      remember_referenced_type(mod, {type, :union_input})
+      variants = union_keyed_variants(type)
+
+      Enum.each(variants, fn {_name, member} ->
+        _ = module_type_from_schema(mod, member, context_map, :input)
+      end)
+
+      type_namespace = namespace_for(type, context_map)
+      name_for([type_namespace, name_from_module(type), "input"])
+    end
+  end
+
+  defp union_type_from_schema(_mod, _type, _context_map, gql_type) do
+    raise ArgumentError,
+          "Dobro.Schema.OneOf/OneOfBy is only supported for GraphQL :result or :input, got: #{inspect(gql_type)}"
+  end
+
+  defp union_member_types(type) do
+    cond do
+      OneOf.one_of?(type) -> type.__one_of_types__()
+      OneOfBy.one_of_by?(type) -> type.__one_of_by_types__()
+    end
+  end
+
+  defp union_keyed_variants(type) do
+    cond do
+      OneOf.one_of?(type) -> OneOf.keyed_variants(type)
+      OneOfBy.one_of_by?(type) -> OneOfBy.keyed_variants(type)
+    end
+  end
+
+  defp one_of_input_type_from_schema(mod, one_of_input, variants, context_map) do
+    type_name = one_of_input_type_name(variants, context_map)
+    remember_referenced_type(mod, {{:one_of_input, type_name, one_of_input}, :one_of_input})
+
+    Enum.each(variants, fn {_name, variant_type} ->
+      _ = type_from_schema(mod, variant_type, context_map, :input)
+    end)
+
+    type_name
+  end
+
+  defp one_of_input_type_name(variants, context_map) do
+    variant_part =
+      variants
+      |> Enum.map(fn {name, type} ->
+        type_ns = if is_atom(type), do: namespace_for(type, context_map), else: nil
+        type_name = if is_atom(type), do: name_from_module(type), else: "value"
+        [type_ns, type_name, name] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+      end)
+      |> Enum.join("_or_")
+
+    name_for(["one_of", variant_part])
   end
 
   def module_type_from_schema(mod, type, context_map, gql_type) when is_atom(type) do
     mod_name = name_from_module(type)
     type_namespace = namespace_for(type, context_map)
-    Module.put_attribute(mod, :referenced_types, {type, gql_type})
-
-    # Register nested
-    # credo:disable-for-next-line Credo.Check.Design.TagTODO
-    # todo: Improve performance by changing to post-processor in before_compile?
-    sub_schema = schema_for(type)
-    if sub_schema, do: fields_from_schema(mod, sub_schema, context_map, gql_type)
-
     suffix = if gql_type == :input, do: "input", else: nil
 
-    name_for([type_namespace, mod_name, suffix])
+    # Short-circuit recursive registrations (e.g. DependencyGroup → DependencyNode → …).
+    if type_already_referenced?(mod, type, gql_type) do
+      name_for([type_namespace, mod_name, suffix])
+    else
+      remember_referenced_type(mod, {type, gql_type})
+
+      # Register nested
+      # credo:disable-for-next-line Credo.Check.Design.TagTODO
+      # todo: Improve performance by changing to post-processor in before_compile?
+      sub_schema = schema_for(type)
+      if sub_schema, do: fields_from_schema(mod, sub_schema, context_map, gql_type)
+
+      name_for([type_namespace, mod_name, suffix])
+    end
+  end
+
+  defp type_already_referenced?(mod, type, gql_type) do
+    try do
+      (Module.get_attribute(mod, :referenced_types) || [])
+      |> Enum.any?(fn
+        {^type, ^gql_type} -> true
+        _ -> false
+      end)
+    rescue
+      # Runtime tests may call type_from_schema/build_type outside compilation.
+      ArgumentError -> false
+    end
+  end
+
+  defp remember_referenced_type(mod, entry) do
+    try do
+      Module.put_attribute(mod, :referenced_types, entry)
+    rescue
+      ArgumentError -> :ok
+    end
   end
 
   defp fields_from_schema(mod, schema, context_map, gql_type) do
@@ -374,15 +554,30 @@ defmodule Dobro.Graphql.Schema do
   end
 
   def build_type(mod, type_mod, opts \\ []) do
-    Code.ensure_compiled(type_mod)
-
     gql_type = Keyword.get(opts, :gql_type, :result)
     context_map = Keyword.get(opts, :context_map, %{})
 
-    if gql_type == :enum or Dobro.Enum.enum?(type_mod) do
-      build_enum_type(type_mod, context_map)
-    else
-      build_object_type(mod, type_mod, gql_type, context_map)
+    cond do
+      gql_type == :one_of_input ->
+        build_one_of_input_type(mod, type_mod, context_map)
+
+      gql_type == :union_input ->
+        Code.ensure_compiled(type_mod)
+        build_union_input_type(mod, type_mod, context_map)
+
+      gql_type == :union or
+          (is_atom(type_mod) and (OneOf.one_of?(type_mod) or OneOfBy.one_of_by?(type_mod)) and
+             gql_type != :input) ->
+        Code.ensure_compiled(type_mod)
+        build_union_type(type_mod, context_map)
+
+      gql_type == :enum or (is_atom(type_mod) and Dobro.Enum.enum?(type_mod)) ->
+        Code.ensure_compiled(type_mod)
+        build_enum_type(type_mod, context_map)
+
+      true ->
+        Code.ensure_compiled(type_mod)
+        build_object_type(mod, type_mod, gql_type, context_map)
     end
   end
 
@@ -446,6 +641,70 @@ defmodule Dobro.Graphql.Schema do
             unquote(fields)
           end
         end
+    end
+  end
+
+  defp build_union_type(type_mod, context_map) do
+    namespace = namespace_for(type_mod, context_map)
+    type_name = name_for([namespace, name_from_module(type_mod)])
+    escaped_context_map = Macro.escape(context_map)
+
+    member_names =
+      Enum.map(union_member_types(type_mod), fn member ->
+        member_ns = namespace_for(member, context_map)
+        name_for([member_ns, name_from_module(member)])
+      end)
+
+    quote do
+      union unquote(type_name) do
+        types(unquote(member_names))
+
+        resolve_type(fn value, _resolution ->
+          case unquote(type_mod).resolve_type(value) do
+            nil ->
+              nil
+
+            member_mod ->
+              member_ns =
+                Dobro.Graphql.Schema.namespace_for(member_mod, unquote(escaped_context_map))
+
+              Dobro.Graphql.Schema.name_for([
+                member_ns,
+                Dobro.Graphql.Schema.name_from_module(member_mod)
+              ])
+          end
+        end)
+      end
+    end
+  end
+
+  defp build_one_of_input_type(mod, {:one_of_input, type_name, %OneOfInput{variants: variants}}, context_map) do
+    build_exclusive_input_object(mod, type_name, variants, context_map)
+  end
+
+  defp build_union_input_type(mod, union_mod, context_map) do
+    namespace = namespace_for(union_mod, context_map)
+    type_name = name_for([namespace, name_from_module(union_mod), "input"])
+    variants = union_keyed_variants(union_mod)
+    build_exclusive_input_object(mod, type_name, variants, context_map)
+  end
+
+  defp build_exclusive_input_object(mod, type_name, variants, context_map) do
+    fields =
+      Enum.map(variants, fn {name, variant_type} ->
+        absinthe_type = type_from_schema(mod, variant_type, context_map, :input)
+
+        quote do
+          field unquote(name), unquote(absinthe_type)
+        end
+      end)
+
+    quote do
+      input_object unquote(type_name) do
+        # Absinthe `directive/1` returns a unique_integer ref (put_attr/2); discard it.
+        _ = directive(:one_of)
+        unquote_splicing(fields)
+      end
     end
   end
 
