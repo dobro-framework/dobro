@@ -12,11 +12,15 @@ defmodule Dobro.App.Command.Commit do
   2. **Stage** — `EventDeliveryStrategy.transactional_stage?/0`. Outbox is true;
      PubSub/None are false.
 
-  | Persist DB? | Stage DB? | Behaviour |
-  |-------------|-----------|-----------|
-  | yes | yes | One transaction around persist + stage (classic outbox) |
-  | no | yes | Persist outside; transaction only around stage |
-  | yes/no | no | No Commit-level transaction (avoid holding a pool connection across HTTP) |
+  | Persist DB? | Stage DB? | `after_persist` | Behaviour |
+  |-------------|-----------|-----------------|-----------|
+  | yes | yes | any | One transaction around persist + after_persist + stage |
+  | yes | no | set | One transaction around persist + after_persist; stage/deliver outside |
+  | yes | no | nil | No Commit-level transaction (single-row persist) |
+  | no | yes | any | Persist (+ after_persist) outside; transaction only around stage |
+  | yes/no | no | nil | No Commit-level transaction |
+
+  DB transactions use `Dobro.Infra.Repo.transact/2` so `{:error, _}` rolls back.
   """
 
   alias Dobro.App.Command.Strategy
@@ -38,6 +42,7 @@ defmodule Dobro.App.Command.Commit do
   def run(%Strategy{} = strategies, unit_of_work, events, tenant, message_identity, aggregate) do
     {persistence_mod, persistence_opts} = strategies.persistence
     {delivery_mod, delivery_opts} = strategies.event_delivery
+    after_persist = strategies.after_persist
     context = %{aggregate: aggregate, tenant: tenant}
 
     persist_tx? =
@@ -58,6 +63,21 @@ defmodule Dobro.App.Command.Commit do
           persistence_opts,
           delivery_mod,
           delivery_opts,
+          after_persist,
+          unit_of_work,
+          events,
+          tenant,
+          message_identity,
+          context
+        )
+
+      persist_tx? and is_function(after_persist, 2) ->
+        persist_and_after_in_transaction(
+          persistence_mod,
+          persistence_opts,
+          delivery_mod,
+          delivery_opts,
+          after_persist,
           unit_of_work,
           events,
           tenant,
@@ -71,6 +91,7 @@ defmodule Dobro.App.Command.Commit do
           persistence_opts,
           delivery_mod,
           delivery_opts,
+          after_persist,
           unit_of_work,
           events,
           tenant,
@@ -84,6 +105,7 @@ defmodule Dobro.App.Command.Commit do
           persistence_opts,
           delivery_mod,
           delivery_opts,
+          after_persist,
           unit_of_work,
           events,
           tenant,
@@ -99,13 +121,14 @@ defmodule Dobro.App.Command.Commit do
          persistence_opts,
          delivery_mod,
          delivery_opts,
+         after_persist,
          unit_of_work,
          events,
          tenant,
          message_identity,
          context
        ) do
-    case Dobro.Infra.Repo.transaction(fn ->
+    case Dobro.Infra.Repo.transact(fn ->
            with {:ok, unit_of_work, events} <-
                   persistence_mod.persist(
                     unit_of_work,
@@ -114,15 +137,50 @@ defmodule Dobro.App.Command.Commit do
                     message_identity,
                     persistence_opts
                   ),
+                :ok <- run_after_persist(after_persist, unit_of_work, tenant),
                 :ok <- delivery_mod.stage(events, context, delivery_opts) do
-             {:ok, unit_of_work, events}
+             {:ok, {unit_of_work, events}}
            end
          end) do
-      {:ok, {:ok, unit_of_work, events}} ->
+      {:ok, {unit_of_work, events}} ->
         deliver(delivery_mod, events, context, delivery_opts, unit_of_work)
 
-      {:ok, {:error, error}} ->
+      {:error, error} ->
         {:error, error}
+    end
+  end
+
+  # Local DB persist + after_persist (PubSub/None): one transaction for both
+  # writes; stage/deliver stay outside so PubSub does not hold the checkout.
+  defp persist_and_after_in_transaction(
+         persistence_mod,
+         persistence_opts,
+         delivery_mod,
+         delivery_opts,
+         after_persist,
+         unit_of_work,
+         events,
+         tenant,
+         message_identity,
+         context
+       ) do
+    case Dobro.Infra.Repo.transact(fn ->
+           with {:ok, unit_of_work, events} <-
+                  persistence_mod.persist(
+                    unit_of_work,
+                    events,
+                    tenant,
+                    message_identity,
+                    persistence_opts
+                  ),
+                :ok <- run_after_persist(after_persist, unit_of_work, tenant) do
+             {:ok, {unit_of_work, events}}
+           end
+         end) do
+      {:ok, {unit_of_work, events}} ->
+        with :ok <- delivery_mod.stage(events, context, delivery_opts) do
+          deliver(delivery_mod, events, context, delivery_opts, unit_of_work)
+        end
 
       {:error, error} ->
         {:error, error}
@@ -136,6 +194,7 @@ defmodule Dobro.App.Command.Commit do
          persistence_opts,
          delivery_mod,
          delivery_opts,
+         after_persist,
          unit_of_work,
          events,
          tenant,
@@ -150,18 +209,20 @@ defmodule Dobro.App.Command.Commit do
              message_identity,
              persistence_opts
            ),
+         :ok <- run_after_persist(after_persist, unit_of_work, tenant),
          :ok <- stage_in_transaction(delivery_mod, events, context, delivery_opts) do
       deliver(delivery_mod, events, context, delivery_opts, unit_of_work)
     end
   end
 
-  # No transactional stage (PubSub/None): skip Commit-level transactions so
-  # remote HTTP adapters do not pin a pool connection for the whole request.
+  # No transactional stage (PubSub/None) and no after_persist: skip Commit-level
+  # transactions so remote HTTP adapters do not pin a pool connection.
   defp persist_and_deliver(
          persistence_mod,
          persistence_opts,
          delivery_mod,
          delivery_opts,
+         after_persist,
          unit_of_work,
          events,
          tenant,
@@ -176,17 +237,32 @@ defmodule Dobro.App.Command.Commit do
              message_identity,
              persistence_opts
            ),
+         :ok <- run_after_persist(after_persist, unit_of_work, tenant),
          :ok <- delivery_mod.stage(events, context, delivery_opts) do
       deliver(delivery_mod, events, context, delivery_opts, unit_of_work)
     end
   end
 
+  defp run_after_persist(nil, _unit_of_work, _tenant), do: :ok
+
+  defp run_after_persist(fun, unit_of_work, tenant) when is_function(fun, 2) do
+    case fun.(unit_of_work, tenant) do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      {:error, _} = error -> error
+      other -> {:error, {:invalid_after_persist_result, other}}
+    end
+  end
+
   defp stage_in_transaction(delivery_mod, events, context, delivery_opts) do
-    case Dobro.Infra.Repo.transaction(fn ->
-           delivery_mod.stage(events, context, delivery_opts)
+    case Dobro.Infra.Repo.transact(fn ->
+           case delivery_mod.stage(events, context, delivery_opts) do
+             :ok -> {:ok, :ok}
+             {:error, _} = error -> error
+             other -> {:error, {:invalid_stage_result, other}}
+           end
          end) do
       {:ok, :ok} -> :ok
-      {:ok, {:error, error}} -> {:error, error}
       {:error, error} -> {:error, error}
     end
   end

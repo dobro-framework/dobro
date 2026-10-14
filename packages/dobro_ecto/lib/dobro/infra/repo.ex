@@ -30,4 +30,12 @@ defmodule Dobro.Infra.Repo do
   def preload(struct_or_structs, preloads, opts \\ []),
     do: apply(repo(), :preload, [struct_or_structs, preloads, opts])
   def transaction(fun, opts \\ []), do: apply(repo(), :transaction, [fun, opts])
+
+  @doc """
+  Runs `fun` in a transaction via `Ecto.Repo.transact/2`.
+
+  `fun` must return `{:ok, result}` or `{:error, reason}`. Errors roll back.
+  """
+  def transact(fun, opts \\ []), do: apply(repo(), :transact, [fun, opts])
 end
+

@@ -16,12 +16,16 @@ defmodule Dobro.App.Command.Strategy do
 
   defstruct execution: nil,
             persistence: nil,
-            event_delivery: nil
+            event_delivery: nil,
+            after_persist: nil
+
+  @type after_persist :: (term(), term() -> :ok | {:ok, term()} | {:error, term()}) | nil
 
   @type t :: %__MODULE__{
           execution: {module(), keyword()},
           persistence: {module(), keyword()},
-          event_delivery: {module(), keyword()}
+          event_delivery: {module(), keyword()},
+          after_persist: after_persist()
         }
 
   @doc """
@@ -29,6 +33,10 @@ defmodule Dobro.App.Command.Strategy do
 
   `handler_module` may be `nil` when handler-level overrides are not needed.
   `handle_opts` are the options passed to `handle/3`.
+
+  Optional `after_persist: fun/2` runs after successful WriteRepo persist with
+  `(unit_of_work, tenant)`. When persist is transactional, Commit runs it in the
+  same database transaction as persist (and outbox stage, when applicable).
   """
   @spec resolve(module() | nil, keyword()) :: t()
   def resolve(handler_module \\ nil, handle_opts \\ []) do
@@ -38,7 +46,8 @@ defmodule Dobro.App.Command.Strategy do
     %__MODULE__{
       execution: ExecutionStrategy.resolve(lookup(:execution_strategy, merged_opts)),
       persistence: PersistenceStrategy.resolve(lookup(:persistence_strategy, merged_opts)),
-      event_delivery: EventDeliveryStrategy.resolve(lookup(:event_delivery_strategy, merged_opts))
+      event_delivery: EventDeliveryStrategy.resolve(lookup(:event_delivery_strategy, merged_opts)),
+      after_persist: Keyword.get(merged_opts, :after_persist)
     }
   end
 

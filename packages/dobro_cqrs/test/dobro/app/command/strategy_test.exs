@@ -53,4 +53,13 @@ defmodule Dobro.App.Command.StrategyTest do
 
     assert strategies.persistence == PersistenceStrategy.resolve(:event_sourced)
   end
+
+  test "resolve/2 carries after_persist from handle options" do
+    fun = fn _uow, _tenant -> :ok end
+
+    strategies = Strategy.resolve(nil, after_persist: fun)
+
+    assert strategies.after_persist == fun
+  end
 end
+

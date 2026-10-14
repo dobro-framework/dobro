@@ -43,7 +43,14 @@ defmodule Dobro.State do
   end
 
   def assign_field(%{input: input} = pipeline, field, %ListOf{of_type: of_type}, opts) do
-    value = Map.get(input, field, [])
+    # Missing and nil both mean "no list" for optional fields (VO structs often
+    # carry nil for unset list_of attrs). Required empty lists still error below.
+    value =
+      case Map.get(input, field, []) do
+        nil -> []
+        other -> other
+      end
+
     opts = Keyword.merge(opts, accumulate: true)
 
     # Initialise value to an empty list
@@ -77,7 +84,11 @@ defmodule Dobro.State do
 
   def validate(%{} = pipeline, field, %ListOf{of_type: of_type}, opts) do
     bind(pipeline, fn pipeline ->
-      value = Map.get(pipeline.state.value, field)
+      value =
+        case Map.get(pipeline.state.value, field) do
+          nil -> []
+          other -> other
+        end
 
       cond do
         not is_list(value) ->
