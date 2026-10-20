@@ -227,6 +227,8 @@ Public API route
 
 Every command follows the same event-driven domain path defined in [dobro_domain](https://hexdocs.pm/dobro_domain). Execution, persistence, and event delivery strategies control concurrency, storage, and fan-out.
 
+Custom `handle` blocks reuse pipeline steps: `execute_command/2` for the full standard path (specify → identify → aggregate → result → finalize), or `execute_aggregate/2-3` when you only need strategy resolution and persistence. Both macros infer `@aggregate_module` and `__MODULE__`.
+
 ---
 
 ## Application queries
@@ -569,7 +571,7 @@ See [Command Strategies RFC](command-strategies.html) for override and combinati
 | `Dobro.App.CommandDefinition` | Define commands and inline command handlers |
 | `Dobro.App.QueryDefinition` | Define **application** queries and inline query handlers |
 | `Dobro.App.CommandHandler` | Command handler macro |
-| `Dobro.App.CommandHandler.Pipeline` | Command pipeline steps |
+| `Dobro.App.CommandHandler.Pipeline` | Command pipeline steps (`execute_command`, `execute_aggregate`, …) |
 | `Dobro.App.QueryHandler` | Query handler macro |
 | `Dobro.App.QueryHandler.Pipeline` | Query pipeline — scope, repo call, finalize, prepare_input |
 | `Dobro.App.Api` | Public API route DSL |

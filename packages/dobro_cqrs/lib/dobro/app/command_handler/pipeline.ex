@@ -150,51 +150,33 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     end)
   end
 
-  # Transaction wrapping lives in `Dobro.App.Command.Commit` (only when the
-  # event delivery strategy needs persist+stage atomicity).
-  def commit_direct(%Pipeline{} = pipeline, opts \\ []) do
-    do_commit_direct(pipeline, opts)
-  end
+  @doc """
+  Standard command path: specify → identify → execute_aggregate → put_command_result → finalize.
 
-  def do_commit_direct(pipeline, _opts \\ []) do
-    alias Dobro.App.Command.Commit
-
-    bind(pipeline, fn pipeline ->
-      strategies = Strategy.resolve(nil, pipeline.config.opts)
-
-      case Commit.run(
-             strategies,
-             pipeline.state.unit_of_work,
-             pipeline.state.events,
-             pipeline.config.tenant,
-             pipeline.input.message_identity,
-             pipeline.state.unit_of_work.aggregate
-           ) do
-        {:ok, unit_of_work, events} ->
-          put_in(pipeline.state, %{
-            pipeline.state
-            | unit_of_work: unit_of_work,
-              events: events
-          })
-
-        {:error, error} ->
-          pipeline |> merge_errors(error)
-      end
-    end)
-  end
-
-  def default_execute(%Pipeline{} = pipeline, call_fn, aggregate_module, handler_module) do
+  Prefer the short-form `execute_command/2` macro from `use Dobro.App.CommandHandler`
+  in handlers; call this arity when you need an explicit aggregate or handler module.
+  """
+  def execute_command(%Pipeline{} = pipeline, call_fn, aggregate_module, handler_module) do
     specifications = Keyword.get(pipeline.config.opts, :if, [])
-    transform_result_fn = Keyword.get(pipeline.config.opts, :transform_result)
 
     pipeline
     |> specify(specifications)
     |> identify(pipeline.config.opts)
-    |> call_and_commit(call_fn, aggregate_module, pipeline.config.opts, handler_module)
+    |> execute_aggregate(call_fn, aggregate_module, pipeline.config.opts, handler_module)
+    |> put_command_result()
+    |> finalize([:result, :version, :events])
+  end
+
+  @doc """
+  Sets `:result` from the aggregate, copies `:version`, and applies `:transform_result` from opts.
+  """
+  def put_command_result(%Pipeline{} = pipeline) do
+    transform_result_fn = Keyword.get(pipeline.config.opts, :transform_result)
+
+    pipeline
     |> put_aggregate_result()
     |> put_result_version()
     |> transform_result(transform_result_fn)
-    |> finalize([:result, :version, :events])
   end
 
   @doc """
@@ -247,7 +229,13 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     end
   end
 
-  def call_and_commit(pipeline, call_fn, aggregate_module, opts \\ [], handler_module \\ nil) do
+  @doc """
+  Resolves execution/persistence/delivery strategies and runs the aggregate function.
+
+  Prefer the short-form `execute_aggregate/2-3` macros from `use Dobro.App.CommandHandler`
+  in handlers; call this arity for explicit aggregate, opts, or handler module.
+  """
+  def execute_aggregate(pipeline, call_fn, aggregate_module, opts \\ [], handler_module \\ nil) do
     bind(pipeline, fn pipeline ->
       strategies = Strategy.resolve(handler_module, opts)
       {execution_mod, execution_opts} = strategies.execution

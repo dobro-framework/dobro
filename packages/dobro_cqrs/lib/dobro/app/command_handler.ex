@@ -46,8 +46,61 @@ defmodule Dobro.App.CommandHandler do
 
       import Dobro.Pipeline, except: [finalize: 1, finalize: 2]
       alias Dobro.Pipeline
-      import Dobro.App.CommandHandler, only: [handle: 2, handle: 3, handle: 4]
-      import Dobro.App.CommandHandler.Pipeline
+
+      import Dobro.App.CommandHandler,
+        only: [
+          handle: 2,
+          handle: 3,
+          handle: 4,
+          execute_command: 2,
+          execute_aggregate: 2,
+          execute_aggregate: 3
+        ]
+
+      # Full-arity execute_* stay on Pipeline for strategies/tests; handlers use macros above.
+      import Dobro.App.CommandHandler.Pipeline,
+        except: [execute_command: 4, execute_aggregate: 3, execute_aggregate: 4, execute_aggregate: 5]
+    end
+  end
+
+  @doc """
+  Runs the standard command path using the handler's `@aggregate_module` and `__MODULE__`.
+  """
+  defmacro execute_command(pipeline, call_fn) do
+    quote do
+      Dobro.App.CommandHandler.Pipeline.execute_command(
+        unquote(pipeline),
+        unquote(call_fn),
+        @aggregate_module,
+        __MODULE__
+      )
+    end
+  end
+
+  @doc """
+  Runs strategy resolution and aggregate invocation using `@aggregate_module` and `__MODULE__`.
+  """
+  defmacro execute_aggregate(pipeline, call_fn) do
+    quote do
+      Dobro.App.CommandHandler.Pipeline.execute_aggregate(
+        unquote(pipeline),
+        unquote(call_fn),
+        @aggregate_module,
+        [],
+        __MODULE__
+      )
+    end
+  end
+
+  defmacro execute_aggregate(pipeline, call_fn, opts) do
+    quote do
+      Dobro.App.CommandHandler.Pipeline.execute_aggregate(
+        unquote(pipeline),
+        unquote(call_fn),
+        @aggregate_module,
+        unquote(opts),
+        __MODULE__
+      )
     end
   end
 
@@ -70,12 +123,12 @@ defmodule Dobro.App.CommandHandler do
     quote do
       def execute(%unquote(command_module){} = command, execution_context) do
         pipeline(command, execution_context, unquote(opts))
-        |> default_execute(unquote(call_fn), @aggregate_module, __MODULE__)
+        |> execute_command(unquote(call_fn))
       end
 
       def execute(%unquote(command_module){} = command) do
         pipeline(command, unquote(opts))
-        |> default_execute(unquote(call_fn), @aggregate_module, __MODULE__)
+        |> execute_command(unquote(call_fn))
       end
     end
   end
