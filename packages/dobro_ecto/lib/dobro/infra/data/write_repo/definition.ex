@@ -62,7 +62,13 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
     quote do
       def to_changeset(%unquote(aggregate_module){} = aggregate) do
-        to_changeset(aggregate, %unquote(schema_module){id: aggregate.id})
+        identity_field = unquote(aggregate_module).__identity_field__()
+        identity_value = Map.get(aggregate, identity_field)
+
+        schema =
+          struct(unquote(schema_module), [{identity_field, identity_value}])
+
+        to_changeset(aggregate, schema)
       end
 
       def to_domain(schema) do

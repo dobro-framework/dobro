@@ -377,6 +377,29 @@ end
 
 Command handlers select the write repo by aggregate module and operation (`:insert`, `:update`, `:delete`).
 
+### Association mappings
+
+Prefer declarative `mappings:` over a custom mapper when possible:
+
+```elixir
+use Dobro.Infra.Data.WriteRepo,
+  aggregate: Order,
+  schema: OrderSchema,
+  mappings: [
+    associations: [
+      # domain id-list ↔ join rows
+      role_ids: {:role_links, :role_id},
+      # list_of(Entity) ↔ has_many (full child attrs)
+      lines: :order_lines
+    ]
+  ]
+```
+
+Bare-atom associations dump/load full row maps. Dobro does not call `cast_assoc` —
+configure it on the Ecto schema (e.g. `has_many :order_lines, ..., on_replace: :delete`
+and `cast_assoc(:order_lines)`) so orphans and upserts sync by child primary key.
+Align the entity `identity:` field with that PK.
+
 ### Delete strategies
 
 | Strategy | Config | Behaviour |

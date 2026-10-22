@@ -6,6 +6,13 @@ defmodule Dobro.Domain.Aggregate do
   via `add_event/3`, apply them with `apply_changes/1`, and validate invariants
   before returning `{:ok, %{value: aggregate, events: events}}`.
 
+  ## Options
+
+    * `:identity` — atom naming the identity field (default `:id`). Injected into
+      `state` as `immutable: true` unless already declared. See `__identity_field__/0`.
+    * `:persistence_strategy` — optional per-aggregate override (`:stateful` /
+      `:event_sourced`).
+
   See the [package README](readme.html) for a complete guide with examples.
   """
   alias Dobro.Domain.Invariants
@@ -23,6 +30,15 @@ defmodule Dobro.Domain.Aggregate do
 
   defmacro __using__(opts \\ []) do
     persistence_strategy = Keyword.get(opts, :persistence_strategy)
+    identity_field = Keyword.get(opts, :identity, :id)
+
+    unless is_atom(identity_field) and not is_nil(identity_field) do
+      raise ArgumentError,
+            "Dobro.Domain.Aggregate identity: must be an atom, got: #{inspect(identity_field)}"
+    end
+
+    # Set during expansion so `state` can read it later in the module body.
+    Module.put_attribute(__CALLER__.module, :dobro_identity_field, identity_field)
 
     quote location: :keep do
       use Invariants
@@ -38,6 +54,7 @@ defmodule Dobro.Domain.Aggregate do
 
       def __stream_name__, do: "#{__MODULE__}_events"
       def __persistence_strategy__, do: @persistence_strategy
+      def __identity_field__, do: unquote(identity_field)
     end
   end
 
@@ -46,13 +63,34 @@ defmodule Dobro.Domain.Aggregate do
     Macros for defining state.
 
     Accepts `extends:` (same semantics as `Dobro.Schema.schema/2`). Extended
-    fields are inserted after `:version` and before the `state` block so the
-    aggregate version field stays first.
-    """
-    defmacro state(opts \\ [], do: block) do
-      {extends, schema_opts} = Keyword.pop(opts, :extends)
+    fields are inserted after `:version` (and the identity field) and before the
+    `state` block so those framework fields stay first.
 
-      except =
+    The identity field (from `use Dobro.Domain.Aggregate, identity: ...`, default
+    `:id`) is injected as `immutable: true` unless the `state` block already
+    declares it.
+
+    When only extending a parent schema (no extra fields), omit the `do` block:
+
+        state extends: Fields
+    """
+    defmacro state(opts, do: block) when is_list(opts) do
+      build_state(opts, block, __CALLER__)
+    end
+
+    defmacro state(do: block) do
+      build_state([], block, __CALLER__)
+    end
+
+    defmacro state(opts) when is_list(opts) do
+      build_state(opts, nil, __CALLER__)
+    end
+
+    defp build_state(opts, block, env) do
+      {extends, schema_opts} = Keyword.pop(opts, :extends)
+      identity_field = Module.get_attribute(env.module, :dobro_identity_field) || :id
+
+      field_names =
         block
         |> block_expressions()
         |> Enum.flat_map(fn
@@ -60,19 +98,38 @@ defmodule Dobro.Domain.Aggregate do
           _ -> []
         end)
 
+      inject_identity? = identity_field not in field_names
+      # When injecting, exclude the identity field from extends so the parent
+      # does not also contribute a duplicate field.
+      except =
+        if inject_identity?,
+          do: Enum.uniq([identity_field | field_names]),
+          else: field_names
+
+      identity_ast =
+        if inject_identity? do
+          quote do
+            field unquote(identity_field), :id, immutable: true
+          end
+        else
+          nil
+        end
+
       body =
         case extends do
           nil ->
             quote do
               field :version, :integer, required: true
+              unquote(identity_ast)
               unquote(block)
             end
 
           ast ->
-            parent = Dobro.Schema.resolve_schema_module(ast, __CALLER__)
+            parent = Dobro.Schema.resolve_schema_module(ast, env)
 
             quote do
               field :version, :integer, required: true
+              unquote(identity_ast)
               extend(unquote(parent), except: unquote(except))
               unquote(block)
             end

@@ -25,11 +25,14 @@ end
 | Concept | Module | Purpose |
 |---------|--------|---------|
 | Aggregate | `Dobro.Domain.Aggregate` | Consistency boundary; all mutations produce events |
+| Entity | `Dobro.Domain.Entity` | Identity-bearing child inside an aggregate; compared by identity |
 | Value object | `Dobro.Domain.ValueObject` | Immutable, validated types compared by value |
 | Domain event | `Dobro.Domain.EventDefinition` | Typed, versioned record of something that happened |
 | Specification | `Dobro.Domain.Specification` | Precondition checked before a command runs |
 | Event handler | `Dobro.App.EventHandler` | Reacts to published domain events |
 | Execution context | `Dobro.App.ExecutionContext` | Auth, tenant, and selection passed to handlers |
+
+Prefer a **value object** when there is no identity. Prefer an **entity** when a nested object has its own id and lifecycle under the root. Prefer a separate **aggregate** when the object needs its own consistency boundary.
 
 ## Event-driven state transitions
 
@@ -160,9 +163,75 @@ When persisting or serialising events, use `Dobro.Domain.ValueObject.value/1` to
 
 ---
 
+## Entities
+
+Entities are classic DDD **child** types: they have identity, live inside an aggregate, and have no events or persistence strategy of their own. Mutations go through the owning aggregate's event pipeline.
+
+```elixir
+defmodule MyApp.OrderLine do
+  use Dobro.Domain.Entity
+  # use Dobro.Domain.Entity, identity: :line_id
+
+  schema do
+    # :id injected as immutable (or the configured identity field)
+    field :product_id, :id, required: true
+    field :quantity, :integer, required: true
+  end
+
+  definvariant quantity_positive(%{quantity: q}) when q > 0, do: :ok
+  definvariant quantity_positive(_), do: {:error, :quantity_must_be_positive}
+end
+```
+
+| Callback | Role |
+|----------|------|
+| `new/1` | Validate + invariants at boundaries (identity may be set once on create) |
+| `load/1` | Hydrate from DB/event payloads without validation |
+| `value/1` | Plain map for serialisation |
+| `equal?/2` | Same module + same identity field value |
+| `identity/1` | Value of `__identity_field__/0` |
+
+Use entities as aggregate state field types, often in a list:
+
+```elixir
+state do
+  field :lines, list_of(MyApp.OrderLine), default: []
+end
+```
+
+`defapply` still hydrates **root** fields. It works when the event replaces a whole `lines` list. Deltas (add/update one line) use a custom `apply/2` with ordinary `Enum` updates.
+
+### Stateful association mapping
+
+In `dobro_ecto` WriteRepo mappings, map a `list_of(Entity)` field to a `has_many` with a **bare atom** (full rows). Id-lists keep the `{assoc, fk}` form:
+
+```elixir
+mappings: [
+  associations: [
+    role_ids: {:role_links, :role_id},  # id-list
+    lines: :order_lines                 # list_of(OrderLine)
+  ]
+]
+```
+
+Dobro only shapes attrs. The Ecto schema should `cast_assoc(:order_lines)` (typically with `on_replace: :delete`) so child rows sync by primary key. Align the entity `identity:` field with that PK.
+
+Event-sourced persistence needs no special casing — children are rebuilt with the aggregate via `apply/2`.
+
+---
+
 ## Aggregates
 
 An aggregate is the consistency boundary for a cluster of domain objects. All changes go through explicit functions that emit events.
+
+### Identity
+
+```elixir
+use Dobro.Domain.Aggregate                    # identity: :id (default)
+use Dobro.Domain.Aggregate, identity: :uuid
+```
+
+The identity field is injected as `immutable: true` unless `state` already declares it. `__identity_field__/0` is used when copying the root id into event payloads and when seeding WriteRepo inserts. Command `identity do` blocks remain the lookup key for actors / event streams / `get_by` and are independent of this option.
 
 ### Complete example
 
@@ -175,9 +244,8 @@ defmodule MyApp.Office do
   alias MyApp.{Address, EmailAddress, PhoneNumber, Url}
   alias MyApp.OfficeEvents, as: Events
 
-  # Aggregate state — persisted fields
+  # Aggregate state — :id and :version are injected
   state do
-    field :id, :id, immutable: true
     field :name, :string, required: true, validate: [{:min_length, 3}]
     field :abbreviation, :string, required: true
     field :phone_number, PhoneNumber
@@ -227,14 +295,14 @@ end
 
 ### State fields
 
-The `state do` block declares persisted aggregate fields. Every aggregate includes a required `version` field automatically (default `0` for new instances).
+The `state do` block declares persisted aggregate fields. Every aggregate includes a required `version` field and an identity field (default `:id`) automatically unless you declare the identity field yourself.
 
 | Option | Effect |
 |--------|--------|
 | `required: true` | Field must be present after event application |
-| `immutable: true` | Field cannot change once set (for example `:id`) |
+| `immutable: true` | Field cannot change once set (identity is injected this way) |
 | `validate: [...]` | Validation rules from `dobro_schema` |
-| Custom type module | Value object or nested contract type |
+| Custom type module | Value object, entity, or nested contract type |
 
 ### Operation contracts
 
@@ -649,6 +717,7 @@ The domain package never imports Ecto, PubSub, or runtime modules. Your aggregat
 | Module | Role |
 |--------|------|
 | `Dobro.Domain.Aggregate` | Aggregate root macro with event pipeline |
+| `Dobro.Domain.Entity` | Child entity macro (identity-bearing nested type) |
 | `Dobro.Domain.ValueObject` | Composite value object macro |
 | `Dobro.Domain.ValueObject.Singular` | Single-field value object macro |
 | `Dobro.Domain.EventDefinition` | Domain event struct generation (`defevent`, `payload`) |

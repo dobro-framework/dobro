@@ -111,7 +111,7 @@ if Code.ensure_loaded?(Igniter) do
       alias #{inspect(meta.bc_module)}.Domain.Events
 
       state do
-        field :id, :id, immutable: true
+        # :id and :version are injected by Dobro.Domain.Aggregate
       #{field_lines}
       end
 

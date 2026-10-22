@@ -17,7 +17,10 @@ defmodule Dobro.Infra.Data.WriteRepo do
           tenant_strategy: :schema,
           mappings: [
             associations: [
-              role_ids: {:role_links, :role_id}
+              # id-list ↔ join rows
+              role_ids: {:role_links, :role_id},
+              # list_of(Entity) ↔ has_many (attrs only; cast_assoc in schema)
+              lines: :order_lines
             ]
           ]
       end

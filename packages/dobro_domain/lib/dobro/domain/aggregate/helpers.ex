@@ -159,7 +159,15 @@ defmodule Dobro.Domain.Aggregate.Helpers do
 
   defp maybe_transform_payload(attrs, _aggregate, _), do: attrs
 
-  defp maybe_put_aggregate_id(attrs, %{id: id}) when not is_nil(id), do: Map.put(attrs, :id, id)
+  defp maybe_put_aggregate_id(attrs, %{__struct__: mod} = aggregate) do
+    field = mod.__identity_field__()
+
+    case Map.get(aggregate, field) do
+      nil -> attrs
+      id -> Map.put(attrs, field, id)
+    end
+  end
+
   defp maybe_put_aggregate_id(attrs, _), do: attrs
 
   defp version_events(%Pipeline{} = pipeline) do

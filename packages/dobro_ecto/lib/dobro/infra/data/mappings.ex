@@ -26,6 +26,17 @@ defmodule Dobro.Infra.Data.Mappings do
       associations: [
         role_ids: {:role_links, :role_id}
       ]
+
+  Full associated values (e.g. `list_of` child entities) use a bare assoc name:
+
+      associations: [
+        lines: :order_lines
+      ]
+
+  For bare-atom mappings, Dobro shapes row attrs only — the schema changeset should
+  `cast_assoc/2` (typically with `on_replace: :delete`) so inserts/updates/orphans
+  sync by child primary key. Align the entity `identity:` field with that PK (or
+  map it via field mappings).
   """
 
   @type field_mapping ::
@@ -33,7 +44,7 @@ defmodule Dobro.Infra.Data.Mappings do
           | {:in, atom()}
           | {:in, atom(), atom()}
 
-  @type association_mapping :: {atom(), atom()}
+  @type association_mapping :: atom() | {atom(), atom()}
 
   @type t :: %{
           fields: %{optional(atom()) => field_mapping()},
@@ -67,7 +78,7 @@ defmodule Dobro.Infra.Data.Mappings do
   def preload_names(%{associations: associations}) do
     associations
     |> Map.values()
-    |> Enum.map(fn {assoc, _fk} -> assoc end)
+    |> Enum.map(&assoc_name/1)
     |> Enum.uniq()
   end
 
@@ -82,19 +93,28 @@ defmodule Dobro.Infra.Data.Mappings do
 
   def association_selected?(assoc, %Dobro.App.Selection{} = selection, mappings) do
     Map.has_key?(selection.associations, assoc) or
-      Enum.any?(mappings.associations, fn {domain_field, {mapped_assoc, _fk}} ->
-        mapped_assoc == assoc and field_selected?(selection, domain_field)
+      Enum.any?(mappings.associations, fn {domain_field, mapping} ->
+        assoc_name(mapping) == assoc and field_selected?(selection, domain_field)
       end)
   end
 
-  @doc "Projects association-mapped domain fields onto a read result."
+  @doc """
+  Projects id-list association mappings onto a read result.
+
+  Bare-atom (full entity) mappings are skipped — the domain field already holds
+  full values from write/query mapping.
+  """
   @spec apply_to_result(term(), t()) :: term()
   def apply_to_result(result, %{associations: associations}) when map_size(associations) == 0,
     do: result
 
   def apply_to_result(result, %{associations: associations}) when is_map(result) do
-    Enum.reduce(associations, result, fn {domain_field, {assoc, fk}}, acc ->
-      Map.put(acc, domain_field, ids_from_assoc(Map.get(acc, assoc), fk))
+    Enum.reduce(associations, result, fn
+      {domain_field, {assoc, fk}}, acc ->
+        Map.put(acc, domain_field, ids_from_assoc(Map.get(acc, assoc), fk))
+
+      {_domain_field, assoc}, acc when is_atom(assoc) ->
+        acc
     end)
   end
 
@@ -128,16 +148,34 @@ defmodule Dobro.Infra.Data.Mappings do
     put_in_container(dto, container, key, value)
   end
 
-  @doc "Reads an id-list domain field from an association on the DTO."
+  @doc """
+  Reads a domain association field from the DTO.
+
+  - `{assoc, fk}` — id-list extracted from association rows
+  - `assoc` (bare atom) — full row maps for DomainValue / entity `load`
+  """
   @spec get_association(map(), association_mapping()) :: [term()]
   def get_association(dto, {assoc, fk}) do
     ids_from_assoc(Map.get(dto, assoc), fk)
   end
 
-  @doc "Writes an id-list domain field as association attrs on the DTO."
+  def get_association(dto, assoc) when is_atom(assoc) do
+    rows_from_assoc(Map.get(dto, assoc))
+  end
+
+  @doc """
+  Writes a domain association field as association attrs on the DTO.
+
+  - `{assoc, fk}` — id-list becomes `[%{fk => id}, ...]`
+  - `assoc` (bare atom) — entity/struct list becomes plain attr maps (via DTO)
+  """
   @spec put_association(map(), [term()], association_mapping()) :: map()
   def put_association(dto, ids, {assoc, fk}) when is_list(ids) do
     Map.put(dto, assoc, Enum.map(ids, fn id -> %{fk => id} end))
+  end
+
+  def put_association(dto, values, assoc) when is_atom(assoc) and is_list(values) do
+    Map.put(dto, assoc, Enum.map(values, &dump_assoc_row/1))
   end
 
   @doc "Extracts foreign-key values from association rows."
@@ -151,6 +189,33 @@ defmodule Dobro.Infra.Data.Mappings do
       other -> other
     end)
   end
+
+  defp assoc_name({assoc, _fk}) when is_atom(assoc), do: assoc
+  defp assoc_name(assoc) when is_atom(assoc), do: assoc
+
+  defp rows_from_assoc(%Ecto.Association.NotLoaded{}), do: []
+  defp rows_from_assoc(nil), do: []
+  defp rows_from_assoc(rows) when is_list(rows), do: Enum.map(rows, &row_attrs/1)
+
+  defp dump_assoc_row(%{__struct__: mod} = struct) do
+    if function_exported?(mod, :value, 1) do
+      mod.value(struct)
+    else
+      Dobro.App.DataTransfer.DTO.to_dto(struct)
+    end
+  end
+
+  defp dump_assoc_row(%{} = map), do: map
+  defp dump_assoc_row(other), do: other
+
+  defp row_attrs(%{__struct__: _} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Map.drop([:__meta__])
+  end
+
+  defp row_attrs(%{} = map), do: Map.drop(map, [:__meta__])
+  defp row_attrs(other), do: other
 
   defp get_in_container(dto, container, key) do
     case Map.get(dto, container) do

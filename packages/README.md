@@ -54,7 +54,7 @@ flowchart TB
 | [dobro](dobro/) | Meta package — Igniter installer + generators |
 | [dobro_spec](dobro_spec/) | Ports, adapters, adapter registries, and shared configuration |
 | [dobro_schema](dobro_schema/) | Typed schemas, validation pipelines, and input contracts |
-| [dobro_domain](dobro_domain/) | Aggregates, value objects, domain events, specifications, and execution context |
+| [dobro_domain](dobro_domain/) | Aggregates, entities, value objects, domain events, specifications, and execution context |
 | [dobro_ecto](dobro_ecto/) | Ecto read/write repositories, the `defquery` DSL, and projections |
 | [dobro_cqrs](dobro_cqrs/) | Commands, queries, handlers, scope policy, and public API definitions |
 | [dobro_runtime](dobro_runtime/) | OTP runtime for aggregate actors, event delivery, and concurrent command execution |

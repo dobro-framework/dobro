@@ -74,4 +74,51 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
   test "with_deleted_at/2 is exported from Helpers" do
     assert Helpers.with_deleted_at(%{}, %{id: 1})[:deleted_at]
   end
+
+  test "__identity_field__/0 defaults to :id" do
+    assert Widget.__identity_field__() == :id
+  end
+
+  defmodule UuidEvents do
+    use Dobro.Domain.EventDefinition
+
+    defevent UuidWidgetCreated do
+      payload do
+        field :uuid, :id
+        field :name, :string
+      end
+    end
+  end
+
+  defmodule UuidWidget do
+    use Dobro.Domain.Aggregate, identity: :uuid
+
+    state do
+      field :name, :string, required: true
+    end
+
+    defcontract Create do
+      field :uuid, :id, required: true
+      field :name, :string, required: true
+    end
+
+    def create(%Create{} = input) do
+      pipeline(input)
+      |> add_event(UuidEvents.UuidWidgetCreated)
+      |> apply_changes()
+    end
+
+    defapply UuidEvents.UuidWidgetCreated
+  end
+
+  test "identity: injects custom field and copies it into event payloads" do
+    assert UuidWidget.__identity_field__() == :uuid
+    assert :uuid in UuidWidget.__fields__()
+    refute :id in UuidWidget.__fields__()
+
+    {:ok, input} = UuidWidget.Create.new(%{uuid: 42, name: "Beta"})
+    assert {:ok, %{value: widget, events: [event]}} = UuidWidget.create(input)
+    assert widget.uuid == 42
+    assert event.payload.uuid == 42
+  end
 end

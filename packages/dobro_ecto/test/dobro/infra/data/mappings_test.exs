@@ -4,6 +4,11 @@ defmodule Dobro.Infra.Data.MappingsTest do
   alias Dobro.App.Selection
   alias Dobro.Infra.Data.Mappings
 
+  defmodule LineEntity do
+    defstruct [:id, :quantity]
+    def value(%__MODULE__{} = line), do: Map.from_struct(line)
+  end
+
   describe "normalize/1" do
     test "normalises keyword mappings" do
       assert %{
@@ -45,9 +50,38 @@ defmodule Dobro.Infra.Data.MappingsTest do
                Mappings.put_association(%{}, [5], {:role_links, :role_id})
     end
 
+    test "reads and writes full entity rows through bare-atom associations" do
+      dto = %{order_lines: [%{id: 1, quantity: 2, __meta__: :ecto}]}
+
+      assert [%{id: 1, quantity: 2}] == Mappings.get_association(dto, :order_lines)
+
+      entities = [%{id: 1, quantity: 3}, %{id: 2, quantity: 1}]
+      assert %{order_lines: ^entities} = Mappings.put_association(%{}, entities, :order_lines)
+    end
+
+    test "dumps entity structs via value/1 when present" do
+      line = %Dobro.Infra.Data.MappingsTest.LineEntity{id: 9, quantity: 4}
+
+      assert %{order_lines: [%{id: 9, quantity: 4}]} ==
+               Mappings.put_association(%{}, [line], :order_lines)
+    end
+
     test "treats not-loaded associations as empty" do
       dto = %{role_links: %Ecto.Association.NotLoaded{}}
       assert [] == Mappings.get_association(dto, {:role_links, :role_id})
+      assert [] == Mappings.get_association(dto, :role_links)
+    end
+
+    test "preload_names includes bare-atom associations" do
+      mappings =
+        Mappings.normalize(
+          associations: [
+            role_ids: {:role_links, :role_id},
+            lines: :order_lines
+          ]
+        )
+
+      assert Enum.sort(Mappings.preload_names(mappings)) == [:order_lines, :role_links]
     end
   end
 
@@ -61,6 +95,13 @@ defmodule Dobro.Infra.Data.MappingsTest do
       assert %{id: 1, role_links: [%{role_id: 3}], role_ids: [3]} ==
                Mappings.apply_to_result(result, mappings)
     end
+
+    test "skips bare-atom entity associations" do
+      mappings = Mappings.normalize(associations: [lines: :order_lines])
+      result = %{id: 1, order_lines: [%{id: 2}]}
+
+      assert result == Mappings.apply_to_result(result, mappings)
+    end
   end
 
   describe "association_selected?/3" do
@@ -70,6 +111,13 @@ defmodule Dobro.Infra.Data.MappingsTest do
 
       assert Mappings.association_selected?(:role_links, selection, mappings)
       refute Mappings.association_selected?(:role_links, %{selection | fields: MapSet.new([:id])}, mappings)
+    end
+
+    test "is selected for bare-atom association domain fields" do
+      mappings = Mappings.normalize(associations: [lines: :order_lines])
+      selection = %Selection{fields: MapSet.new([:lines]), associations: %{}}
+
+      assert Mappings.association_selected?(:order_lines, selection, mappings)
     end
   end
 end
