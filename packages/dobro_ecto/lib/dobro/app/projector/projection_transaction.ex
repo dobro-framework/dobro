@@ -36,7 +36,10 @@ defmodule Dobro.App.Projector.ProjectionTransaction do
     Dobro.Infra.Repo.insert(projection_version,
       prefix: prefix,
       on_conflict: update_projection_version,
-      conflict_target: [:projection_name, :stream_name]
+      conflict_target: [:projection_name, :stream_name, :partition_key],
+      # When the conflict UPDATE matches no rows (version already seen), raise
+      # so we treat the event as idempotent rather than re-projecting.
+      stale_error_field: :last_seen_event_number
     )
   rescue
     _exception in Ecto.StaleEntryError ->

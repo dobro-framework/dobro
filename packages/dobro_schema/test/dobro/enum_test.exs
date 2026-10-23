@@ -38,6 +38,11 @@ defmodule Dobro.EnumTest do
     assert {:error, [%Dobro.Error{reason: :invalid_enum}]} = Colour.cast(1)
   end
 
+  test "accepts nil for optional enum fields" do
+    assert Colour.cast(nil) == {:ok, nil}
+    assert Colour.load(nil) == {:ok, nil}
+  end
+
   test "Dobro.Enum.enum?/1 detects enum modules" do
     assert Dobro.Enum.enum?(Colour)
     refute Dobro.Enum.enum?(String)

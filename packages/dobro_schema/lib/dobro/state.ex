@@ -8,9 +8,18 @@ defmodule Dobro.State do
   # @todo: move to domain layer
   alias Dobro.Schema.DomainValue
 
-  defmacro changed?(field) do
+  @doc """
+  Condition for `add_event(..., if: ...)`.
+
+  Accepts a single field or a list of fields (true if **any** listed field
+  differs between aggregate state and pipeline input):
+
+      if: changed?(:name)
+      if: changed?([:name, :email, :role_ids])
+  """
+  defmacro changed?(field_or_fields) do
     quote do
-      {:changed, unquote(field)}
+      {:changed, unquote(field_or_fields)}
     end
   end
 
@@ -543,8 +552,11 @@ defmodule Dobro.State do
       {:ok, value} ->
         put_in(pipeline.state.value, Map.put(pipeline.state.value, field, value))
 
+      {:error, errors} when is_list(errors) ->
+        merge_errors(pipeline, errors, path_prefix: field)
+
       {:error, error} ->
-        add_error(pipeline, error)
+        add_error(pipeline, error, path_prefix: field)
     end
   end
 end

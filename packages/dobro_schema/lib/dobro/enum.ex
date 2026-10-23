@@ -143,7 +143,11 @@ defmodule Dobro.Enum do
   end
 
   @doc false
-  @spec cast_value(module(), term(), [atom()]) :: {:ok, atom()} | {:error, [Dobro.Error.t()]}
+  @spec cast_value(module(), term(), [atom()]) ::
+          {:ok, atom() | nil} | {:error, [Dobro.Error.t()]}
+  # Optional enum fields hydrate as nil; requiredness is enforced via NonNull / required: true.
+  def cast_value(_module, nil, _values), do: {:ok, nil}
+
   def cast_value(module, value, values) when is_atom(value) do
     cond do
       value in values ->

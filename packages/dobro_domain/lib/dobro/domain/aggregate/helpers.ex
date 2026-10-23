@@ -189,7 +189,13 @@ defmodule Dobro.Domain.Aggregate.Helpers do
     conditions |> Enum.all?(&exec_event?(pipeline, &1))
   end
 
-  defp exec_event?(pipeline, {:changed, field}) do
+  # Any of the listed fields changed (OR). Use `if: [changed?(:a), changed?(:b)]`
+  # when every condition must hold (AND).
+  defp exec_event?(pipeline, {:changed, fields}) when is_list(fields) do
+    Enum.any?(fields, &exec_event?(pipeline, {:changed, &1}))
+  end
+
+  defp exec_event?(pipeline, {:changed, field}) when is_atom(field) do
     Map.has_key?(pipeline.state.value, field) and
       Map.get(pipeline.state.value, field) != Map.get(pipeline.input, field)
   end

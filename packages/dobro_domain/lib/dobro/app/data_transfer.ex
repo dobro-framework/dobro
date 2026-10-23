@@ -26,6 +26,16 @@ defmodule Dobro.App.DataTransfer do
     def to_dto(other), do: other
   end
 
+  defimpl DTO, for: Date do
+    # Keep calendar dates intact. The Any impl would Map.from_struct/1 them into
+    # %{year:, month:, day:, calendar:}, which Types.Date.new/1 rejects as nil.
+    def to_dto(%Date{} = value), do: value
+  end
+
+  defimpl DTO, for: Time do
+    def to_dto(%Time{} = value), do: value
+  end
+
   defimpl DTO, for: NaiveDateTime do
     def to_dto(%NaiveDateTime{} = value) do
       DateTime.from_naive!(value, "Etc/UTC")

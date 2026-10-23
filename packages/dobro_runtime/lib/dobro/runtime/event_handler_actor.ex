@@ -139,6 +139,10 @@ defmodule Dobro.Runtime.EventHandlerActor do
 
   def handle_info({:event, _event}, state), do: {:noreply, state}
 
+  # trap_exit is enabled so lock release stays orderly; ignore linked-child exits
+  # (e.g. Agent/Task from Oban :inline jobs running inside handle/1).
+  def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
   @impl GenServer
   def handle_call(:read_handler_state, _from, state) do
     {:reply, state.handler_state, state}

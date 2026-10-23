@@ -59,9 +59,17 @@ defmodule Dobro.Pipeline do
   end
 
   @doc """
-  Adds an error to the pipeline
+  Adds an error to the pipeline.
+
+  When given a list of errors (e.g. from `Dobro.Enum.cast/1`), merges them.
   """
-  def add_error(%{} = pipeline, error, opts \\ []) do
+  def add_error(pipeline, error, opts \\ [])
+
+  def add_error(%{} = pipeline, errors, opts) when is_list(errors) do
+    merge_errors(pipeline, errors, opts)
+  end
+
+  def add_error(%{} = pipeline, error, opts) do
     %{pipeline | errors: Dobro.Error.add(pipeline.errors, error, opts)}
   end
 

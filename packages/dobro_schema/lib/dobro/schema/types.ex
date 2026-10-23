@@ -9,6 +9,7 @@ defmodule Dobro.Schema.Types do
     string: Types.String,
     integer: Types.Integer,
     float: Types.Float,
+    date: Types.Date,
     datetime: Types.DateTime,
     map: Types.Map,
     any: Types.Any,
@@ -178,6 +179,51 @@ defmodule Dobro.Schema.Types do
     @impl true
     def validate(nil, :presence), do: {:error, :required}
     def validate(_, :presence), do: :ok
+    def validate(_value, _validator), do: :ok
+  end
+
+  defmodule Date do
+    @moduledoc """
+    Calendar date (no time-of-day).
+    """
+
+    @behaviour Dobro.Schema.Type
+
+    @impl true
+    def new(nil), do: nil
+
+    def new(%Elixir.Date{} = value), do: value
+
+    def new(%Elixir.DateTime{} = value), do: Elixir.DateTime.to_date(value)
+
+    def new(%NaiveDateTime{} = value), do: NaiveDateTime.to_date(value)
+
+    # Plain maps from accidental Map.from_struct(%Date{}) / JSON round-trips.
+    def new(%{year: year, month: month, day: day})
+        when is_integer(year) and is_integer(month) and is_integer(day) do
+      case Elixir.Date.new(year, month, day) do
+        {:ok, date} -> date
+        _ -> nil
+      end
+    end
+
+    def new(value) when is_binary(value) do
+      case Elixir.Date.from_iso8601(value) do
+        {:ok, date} ->
+          date
+
+        _ ->
+          # Accept datetime strings by taking the date portion.
+          case Elixir.DateTime.from_iso8601(value) do
+            {:ok, dt, _offset} -> Elixir.DateTime.to_date(dt)
+            _ -> nil
+          end
+      end
+    end
+
+    def new(_), do: nil
+
+    @impl true
     def validate(_value, _validator), do: :ok
   end
 

@@ -121,4 +121,56 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     assert widget.uuid == 42
     assert event.payload.uuid == 42
   end
+
+  defmodule UpdateEvents do
+    use Dobro.Domain.EventDefinition
+
+    defevent WidgetDetailsUpdated do
+      payload do
+        field :id, :id
+        field :name, :string
+        field :colour, :string
+      end
+    end
+  end
+
+  defmodule UpdatableWidget do
+    use Dobro.Domain.Aggregate
+    import Dobro.State
+
+    state do
+      field :name, :string, required: true
+      field :colour, :string
+    end
+
+    defcontract Update do
+      field :name, :string
+      field :colour, :string
+    end
+
+    def update(%__MODULE__{} = widget, %Update{} = input) do
+      widget
+      |> pipeline(input)
+      |> add_event(UpdateEvents.WidgetDetailsUpdated,
+        if: changed?([:name, :colour])
+      )
+      |> apply_changes()
+    end
+
+    defapply UpdateEvents.WidgetDetailsUpdated, [:name, :colour]
+  end
+
+  test "changed?/1 with a field list emits when any listed field differs" do
+    widget = %UpdatableWidget{id: 1, name: "Alpha", colour: "red", version: 1}
+
+    {:ok, same} = UpdatableWidget.Update.new(%{name: "Alpha", colour: "red"})
+    assert {:ok, %{events: []}} = UpdatableWidget.update(widget, same)
+
+    {:ok, colour_only} = UpdatableWidget.Update.new(%{name: "Alpha", colour: "blue"})
+    assert {:ok, %{value: updated, events: [event]}} =
+             UpdatableWidget.update(widget, colour_only)
+
+    assert updated.colour == "blue"
+    assert event.payload.colour == "blue"
+  end
 end
