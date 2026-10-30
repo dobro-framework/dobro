@@ -22,10 +22,12 @@ defmodule Dobro.Domain.Aggregate do
   defmodule AggregateState do
     @moduledoc """
     State for the aggregate pipeline
-    - aggregate: the aggregate instance
+    - value: the aggregate instance
     - events: the domain events to be applied to the aggregate
+    - workspace: intermediate results for later pipeline steps (same idea as
+      command/query handler workspace)
     """
-    defstruct value: %{}, events: []
+    defstruct value: %{}, events: [], workspace: %{}
   end
 
   defmacro __using__(opts \\ []) do
@@ -189,6 +191,11 @@ defmodule Dobro.Domain.Aggregate do
 
       Pass an event module to map the contract input conventionally, optionally with a
       post-transform `(aggregate, attrs) -> attrs` to merge extra payload fields.
+
+      Alternatively pass a builder function:
+
+        * `(aggregate, input) -> {:ok, event}` — conventional 2-arity builder
+        * `(pipeline) -> {:ok, event}` — pipeline-aware builder (can read workspace)
       """
       def add_event(pipeline, event_module_or_function, opts \\ [])
 
@@ -207,6 +214,8 @@ defmodule Dobro.Domain.Aggregate do
       end
 
       defdelegate with_deleted_at(aggregate, attrs), to: Helpers
+      defdelegate put_in_workspace(pipeline, key, value), to: Helpers
+      defdelegate get_from_workspace(pipeline, key), to: Helpers
 
       def verify(%Pipeline{} = pipeline), do: Helpers.verify(__MODULE__, pipeline)
 

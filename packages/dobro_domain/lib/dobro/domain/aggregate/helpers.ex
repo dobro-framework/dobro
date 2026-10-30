@@ -64,6 +64,16 @@ defmodule Dobro.Domain.Aggregate.Helpers do
     Map.put(attrs, :deleted_at, DateTime.utc_now(:microsecond))
   end
 
+  @doc "Stores an intermediate value on the aggregate pipeline workspace."
+  def put_in_workspace(%Pipeline{} = pipeline, key, value) do
+    put_in(pipeline.state.workspace[key], value)
+  end
+
+  @doc "Reads an intermediate value from the aggregate pipeline workspace."
+  def get_from_workspace(%Pipeline{} = pipeline, key) do
+    pipeline.state.workspace[key]
+  end
+
   def verify(aggregate_module, %Pipeline{} = pipeline) do
     pipeline
     |> validate(aggregate_module.__schema__())
@@ -106,6 +116,12 @@ defmodule Dobro.Domain.Aggregate.Helpers do
 
   defp do_add_event(pipeline, aggregate_module, event_module_or_function, opts)
 
+  defp do_add_event(%Pipeline{} = pipeline, _aggregate_module, event_function, _opts)
+       when is_function(event_function, 1) do
+    event = unwrap_built_event(event_function.(pipeline))
+    put_in(pipeline.state, %{pipeline.state | events: [event | pipeline.state.events]})
+  end
+
   defp do_add_event(%Pipeline{} = pipeline, aggregate_module, event_function, _opts)
        when is_function(event_function, 2) do
     event =
@@ -137,11 +153,13 @@ defmodule Dobro.Domain.Aggregate.Helpers do
   end
 
   defp event_from_function(_aggregate_module, aggregate, %{} = input, event_function) do
-    case event_function.(aggregate, input) do
-      {:ok, event} -> event
-      {:error, error} -> raise "Failed to build event: #{inspect(error)}"
-    end
+    unwrap_built_event(event_function.(aggregate, input))
   end
+
+  defp unwrap_built_event({:ok, event}), do: event
+
+  defp unwrap_built_event({:error, error}),
+    do: raise("Failed to build event: #{inspect(error)}")
 
   defp event_from_input(aggregate, input, event_module, transform_fn \\ nil) do
     attrs =

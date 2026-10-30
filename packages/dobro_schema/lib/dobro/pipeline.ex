@@ -35,6 +35,26 @@ defmodule Dobro.Pipeline do
   def bind(%{} = pipeline, _fun), do: pipeline
 
   @doc """
+  Runs a pipeline step that may fail.
+
+  `fun` receives the pipeline and must return:
+
+    * `{:ok, pipeline}` — continue with the returned pipeline
+    * `{:error, error}` — add `error` (or a list of errors) and short-circuit
+
+  Useful when a step both validates and produces data for later steps
+  (unlike `precondition/2`, which only gates).
+  """
+  def step(%{} = pipeline, fun) when is_function(fun, 1) do
+    bind(pipeline, fn pipeline ->
+      case fun.(pipeline) do
+        {:ok, %__MODULE__{} = next} -> next
+        {:error, error} -> add_error(pipeline, error)
+      end
+    end)
+  end
+
+  @doc """
   Finalizes the pipeline - returns the pipeline state as a tuple with :ok and the key if provided
   or a tuple with :error and the errors if there are any
   """

@@ -173,4 +173,68 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     assert updated.colour == "blue"
     assert event.payload.colour == "blue"
   end
+
+  test "put_in_workspace/3 and get_from_workspace/2 round-trip" do
+    pipeline = Widget.pipeline(%Widget.Create{name: "Alpha"})
+    pipeline = Widget.put_in_workspace(pipeline, :note, "hello")
+
+    assert Widget.get_from_workspace(pipeline, :note) == "hello"
+  end
+
+  defmodule WorkspaceEvents do
+    use Dobro.Domain.EventDefinition
+
+    defevent WidgetNoted do
+      payload do
+        field :id, :id
+        field :name, :string
+        field :note, :string
+      end
+    end
+  end
+
+  defmodule WorkspaceWidget do
+    use Dobro.Domain.Aggregate
+
+    state do
+      field :name, :string, required: true
+    end
+
+    defcontract Note do
+      field :name, :string
+    end
+
+    def note(%__MODULE__{} = widget, %Note{} = input) do
+      widget
+      |> pipeline(input)
+      |> step(fn pipeline ->
+        {:ok, put_in_workspace(pipeline, :note, "from-workspace")}
+      end)
+      |> add_event(&widget_noted/1)
+      |> apply_changes()
+    end
+
+    defapply WorkspaceEvents.WidgetNoted, [:name]
+
+    defp widget_noted(
+           %{state: %{value: widget, workspace: %{note: note}}, input: input}
+         ) do
+      WorkspaceEvents.WidgetNoted.new(%{
+        payload: %{
+          id: widget.id,
+          name: input.name || widget.name,
+          note: note
+        }
+      })
+    end
+  end
+
+  test "1-arity add_event builder can read workspace" do
+    widget = %WorkspaceWidget{id: 1, name: "Alpha", version: 1}
+    {:ok, input} = WorkspaceWidget.Note.new(%{name: "Beta"})
+
+    assert {:ok, %{value: updated, events: [event]}} = WorkspaceWidget.note(widget, input)
+    assert updated.name == "Beta"
+    assert event.payload.note == "from-workspace"
+  end
 end
