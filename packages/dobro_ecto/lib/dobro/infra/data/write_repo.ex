@@ -4,9 +4,18 @@ defmodule Dobro.Infra.Data.WriteRepo do
 
   ## Usage
 
-  Provide `aggregate`, `schema`, and optionally `tenant_strategy`. Prefer declarative
-  `mappings:` for domain ↔ schema translation; use `mapper:` only when you need custom
-  mapping logic that mappings cannot express.
+  Provide `aggregate`, `schema`, and optionally `tenant_strategy` — same atoms as
+  `Dobro.Infra.Data.ReadRepo`:
+
+  - `nil` / omit — no tenant handling (`NoTenantStrategy`)
+  - `:tenant_id` — stamp `tenant_id` onto the changeset from write context
+  - `:schema` — set Ecto repo `prefix` from write context
+
+  Prefer declarative `mappings:` for domain ↔ schema translation; use `mapper:`
+  only when you need custom mapping logic that mappings cannot express.
+
+  When using a custom `mapper:` with `has_many` associations, pass
+  `preloads: [:assoc_name]` so get/save round-trips load child rows.
 
   Example with association mappings:
 
@@ -39,10 +48,19 @@ defmodule Dobro.Infra.Data.WriteRepo do
           ]
         ]
 
+  Shared-schema (column) tenancy — tenant lives on the row, not the domain:
+
+      use Dobro.Infra.Data.WriteRepo,
+        aggregate: Case,
+        schema: CaseSchema,
+        tenant_strategy: :tenant_id
+
   `:mapper` and `:mappings` are mutually exclusive.
   """
 
+  alias Dobro.Error
   alias Dobro.Infra.Data.WriteRepo.Definition
+  alias Dobro.Infra.SchemaPrefix
 
   defmodule Context do
     @moduledoc """
@@ -58,6 +76,18 @@ defmodule Dobro.Infra.Data.WriteRepo do
 
     def new(attrs) do
       struct(__MODULE__, attrs)
+    end
+
+    def context_for(opts) do
+      tenant_id = Keyword.get(opts, :tenant_id)
+      tenant_identifier = Keyword.get(opts, :tenant_identifier)
+
+      %Context{
+        tenant: %TenantContext{
+          id: tenant_id,
+          identifier: tenant_identifier
+        }
+      }
     end
   end
 
@@ -75,6 +105,65 @@ defmodule Dobro.Infra.Data.WriteRepo do
     def new(attrs) do
       struct(__MODULE__, attrs)
     end
+  end
+
+  defmodule NoTenantStrategy do
+    @moduledoc """
+    Strategy for write repos that do not have a tenant — mirrors ReadRepo.NoTenantStrategy.
+    """
+
+    def repo_opts(%Context{}), do: {:ok, []}
+
+    def apply_to_changeset(changeset, %Context{}), do: {:ok, changeset}
+  end
+
+  defmodule TenantIdStrategy do
+    @moduledoc """
+    Strategy for write repos that store a tenant id column — mirrors ReadRepo.TenantIdStrategy.
+
+    Stamps `tenant_id` onto the changeset from write context so domain aggregates
+    need not carry storage tenancy.
+    """
+
+    def repo_opts(%Context{}), do: {:ok, []}
+
+    def apply_to_changeset(changeset, %Context{} = context) do
+      case tenant_id_from_context(context) do
+        nil ->
+          {:error,
+           Error.new(:missing_tenant,
+             description: "Tenant id is required for tenant_id write strategy"
+           )}
+
+        tenant_id ->
+          changeset =
+            changeset
+            |> Ecto.Changeset.put_change(:tenant_id, tenant_id)
+            |> clear_field_error(:tenant_id)
+
+          {:ok, changeset}
+      end
+    end
+
+    # Domain aggregates do not carry tenant_id; schema validate_required may have
+    # failed before the stamp. Clear that error once the column is set from context.
+    defp clear_field_error(%Ecto.Changeset{} = changeset, field) do
+      errors = Keyword.delete(changeset.errors, field)
+      %{changeset | errors: errors, valid?: errors == []}
+    end
+
+    defp tenant_id_from_context(%Context{tenant: %{id: tenant_id}}), do: tenant_id
+    defp tenant_id_from_context(_), do: nil
+  end
+
+  defmodule SchemaStrategy do
+    @moduledoc """
+    Strategy for write repos that use a schema per tenant — mirrors ReadRepo.SchemaStrategy.
+    """
+
+    def repo_opts(%Context{} = context), do: SchemaPrefix.repo_opts(context)
+
+    def apply_to_changeset(changeset, %Context{}), do: {:ok, changeset}
   end
 
   defmacro __using__(opts) do

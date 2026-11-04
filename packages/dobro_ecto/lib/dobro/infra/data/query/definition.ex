@@ -61,6 +61,27 @@ defmodule Dobro.Infra.Data.Query.Definition do
 
   Joins resolve from Ecto associations on the source schema. Use `through:` to join
   associations on an earlier join binding (e.g. `through: :tenant` chains onto `:tenant`).
+
+  Explicit joins (no association required) accept `schema:`, `on: {left, right}`,
+  optional `prefix: :tenant`, and `and_not_deleted: true`. The `on` left side may be
+  a column atom or a `dynamic(...)` (e.g. JSON fragment). Join fields may use `expr:`.
+
+  Batch enrichment (Dataloader-shaped, GraphQL-agnostic) attaches related values by FK:
+
+      enrich :next_of_kin,
+        key: :person_id,
+        into: :person,
+        from: {PersonShadowReadRepo, PersonShadowReadRepo.ListPersonOptions}
+
+      enrich :coverage,
+        key: :purchaser_person_id,
+        into: :purchaser_person,
+        with: {PersonShadow, :load_options}
+
+  Prefer `from: {ReadRepo, QueryModule}` when the loader is a list-by-ids defquery
+  (`args.ids` → `%{items: [%{id: ...} | ...]}`). `with: {Mod, :fun}` remains for
+  custom `fun(ids, context) :: %{id => value}` loaders. Multiple enrich decls that
+  share the same loader are coalesced into one call.
   """
 
   alias Dobro.Infra.Data.Query.Compiler

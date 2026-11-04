@@ -27,7 +27,6 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     use Dobro.Domain.Aggregate
 
     state do
-      field :id, :id, immutable: true
       field :name, :string, required: true
     end
 
@@ -75,8 +74,8 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     assert Helpers.with_deleted_at(%{}, %{id: 1})[:deleted_at]
   end
 
-  test "__identity_field__/0 defaults to :id" do
-    assert Widget.__identity_field__() == :id
+  test "__identity_fields__/0 defaults to [:id]" do
+    assert Widget.__identity_fields__() == [:id]
   end
 
   defmodule UuidEvents do
@@ -91,14 +90,17 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
   end
 
   defmodule UuidWidget do
-    use Dobro.Domain.Aggregate, identity: :uuid
+    use Dobro.Domain.Aggregate
+
+    identity do
+      field :uuid, :id
+    end
 
     state do
       field :name, :string, required: true
     end
 
     defcontract Create do
-      field :uuid, :id, required: true
       field :name, :string, required: true
     end
 
@@ -108,16 +110,23 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
+    def create(%__MODULE__{} = widget, %Create{} = input) do
+      pipeline(widget, input)
+      |> add_event(UuidEvents.UuidWidgetCreated)
+      |> apply_changes()
+    end
+
     defapply UuidEvents.UuidWidgetCreated
   end
 
-  test "identity: injects custom field and copies it into event payloads" do
-    assert UuidWidget.__identity_field__() == :uuid
+  test "identity do injects custom field and copies it into event payloads" do
+    assert UuidWidget.__identity_fields__() == [:uuid]
     assert :uuid in UuidWidget.__fields__()
     refute :id in UuidWidget.__fields__()
 
-    {:ok, input} = UuidWidget.Create.new(%{uuid: 42, name: "Beta"})
-    assert {:ok, %{value: widget, events: [event]}} = UuidWidget.create(input)
+    seeded = struct(UuidWidget, uuid: 42, version: 0)
+    {:ok, input} = UuidWidget.Create.new(%{name: "Beta"})
+    assert {:ok, %{value: widget, events: [event]}} = UuidWidget.create(seeded, input)
     assert widget.uuid == 42
     assert event.payload.uuid == 42
   end

@@ -25,6 +25,7 @@ defmodule Dobro.Query.List do
   def run(queryable, params, %Spec{} = spec, opts \\ []) do
     params = Params.normalize_query(params)
     selection = Keyword.get(opts, :selection)
+    context = context_from_opts(opts)
 
     with :ok <- validate_params(params, spec),
          {:ok, params} <- cast_filter_values(params, spec) do
@@ -40,17 +41,24 @@ defmodule Dobro.Query.List do
 
       count_queryable =
         base
-        |> maybe_apply_joins(spec, count_fields)
+        |> maybe_apply_joins(spec, count_fields, context)
         |> apply_filters(spec, params)
 
       page_queryable =
         base
-        |> maybe_apply_joins(spec, page_fields)
+        |> maybe_apply_joins(spec, page_fields, context)
         |> maybe_apply_select(spec, page_fields)
         |> apply_filters(spec, params)
         |> apply_order(spec, params)
 
       paginate(page_queryable, count_queryable, params, spec, opts)
+    end
+  end
+
+  defp context_from_opts(opts) do
+    case Keyword.get(opts, :strategy_opts, []) |> Keyword.get(:context) do
+      nil -> Keyword.get(opts, :context)
+      context -> context
     end
   end
 
@@ -163,42 +171,14 @@ defmodule Dobro.Query.List do
 
   defp put_filter_value(filter, value), do: Map.put(filter, :value, value)
 
-  defp maybe_apply_joins(%Ecto.Query{select: %{expr: _}} = queryable, _spec, _fields), do: queryable
-  defp maybe_apply_joins(queryable, spec, needed_fields), do: apply_joins(queryable, spec, needed_fields)
+  defp maybe_apply_joins(%Ecto.Query{select: %{expr: _}} = queryable, _spec, _fields, _context),
+    do: queryable
+
+  defp maybe_apply_joins(queryable, spec, needed_fields, context),
+    do: Helpers.apply_joins(queryable, spec, needed_fields, context)
 
   defp maybe_apply_select(%Ecto.Query{select: %{expr: _}} = queryable, _spec, _fields), do: queryable
   defp maybe_apply_select(queryable, spec, needed_fields), do: apply_select(queryable, spec, needed_fields)
-
-  defp apply_joins(queryable, spec, needed_fields) do
-    spec
-    |> Spec.joins_for_fields(needed_fields)
-    |> Enum.reduce(queryable, fn join_spec, query ->
-      apply_join(query, join_spec.name, join_spec)
-    end)
-  end
-
-  defp apply_join(query, join_name, %{schema: schema, type: :left, on: on}) do
-    {left_binding, left_field, _right_binding, right_field} = on
-
-    join(query, :left, [{^left_binding, left}], assoc in ^schema,
-      on: field(left, ^left_field) == field(assoc, ^right_field),
-      as: ^join_name
-    )
-  end
-
-  defp apply_join(query, join_name, %{schema: schema, type: :inner, on: on}) do
-    {left_binding, left_field, _right_binding, right_field} = on
-
-    join(query, :inner, [{^left_binding, left}], assoc in ^schema,
-      on: field(left, ^left_field) == field(assoc, ^right_field),
-      as: ^join_name
-    )
-  end
-
-  defp apply_join(query, join_name, %{schema: schema, type: type, on: on})
-       when type not in [:left, :inner] do
-    apply_join(query, join_name, %{schema: schema, type: :inner, on: on})
-  end
 
   defp apply_select(queryable, spec, needed_fields) do
     select_map =
@@ -216,6 +196,8 @@ defmodule Dobro.Query.List do
   defp select_expr({:join, join, source}, _spec) do
     dynamic([{^join, row}], field(row, ^source))
   end
+
+  defp select_expr({:join_expr, _join, expr}, _spec), do: Spec.resolve_expr(expr)
 
   defp select_expr({:expr, expr}, _spec), do: Spec.resolve_expr(expr)
 

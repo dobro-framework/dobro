@@ -16,7 +16,11 @@ defmodule Dobro.Infra.Data.Mappings do
         abbreviation: {:in, :json_attributes},
 
         # value inside a map/embed column, different key
-        phone: {:in, :json_attributes, :phone_number}
+        phone: {:in, :json_attributes, :phone_number},
+
+        # one domain VO/map ↔ several flat columns
+        next_of_kin:
+          {:spread, person_id: :next_of_kin_person_id, relationship: :next_of_kin_relationship}
       ]
 
   ## Association mappings
@@ -33,18 +37,31 @@ defmodule Dobro.Infra.Data.Mappings do
         lines: :order_lines
       ]
 
-  For bare-atom mappings, Dobro shapes row attrs only — the schema changeset should
-  `cast_assoc/2` (typically with `on_replace: :delete`) so inserts/updates/orphans
-  sync by child primary key. Align the entity `identity:` field with that PK (or
-  map it via field mappings).
+  Ordered child lists stamp a position column from list index on write
+  (default field `:position`):
+
+      associations: [
+        additional_contacts: {:ordered, :additional_contacts}
+        # or {:ordered, :additional_contacts, :sort_order}
+      ]
+
+  For bare-atom and ordered mappings, Dobro shapes row attrs only — the schema
+  changeset should `cast_assoc/2` (typically with `on_replace: :delete`) so
+  inserts/updates/orphans sync by child primary key. Align the entity
+  `identity:` field with that PK (or map it via field mappings).
   """
 
   @type field_mapping ::
           atom()
           | {:in, atom()}
           | {:in, atom(), atom()}
+          | {:spread, keyword()}
 
-  @type association_mapping :: atom() | {atom(), atom()}
+  @type association_mapping ::
+          atom()
+          | {atom(), atom()}
+          | {:ordered, atom()}
+          | {:ordered, atom(), atom()}
 
   @type t :: %{
           fields: %{optional(atom()) => field_mapping()},
@@ -101,8 +118,8 @@ defmodule Dobro.Infra.Data.Mappings do
   @doc """
   Projects id-list association mappings onto a read result.
 
-  Bare-atom (full entity) mappings are skipped — the domain field already holds
-  full values from write/query mapping.
+  Bare-atom and ordered (full entity) mappings are skipped — the domain field
+  already holds full values from write/query mapping.
   """
   @spec apply_to_result(term(), t()) :: term()
   def apply_to_result(result, %{associations: associations}) when map_size(associations) == 0,
@@ -110,7 +127,13 @@ defmodule Dobro.Infra.Data.Mappings do
 
   def apply_to_result(result, %{associations: associations}) when is_map(result) do
     Enum.reduce(associations, result, fn
-      {domain_field, {assoc, fk}}, acc ->
+      {_domain_field, {:ordered, _assoc}}, acc ->
+        acc
+
+      {_domain_field, {:ordered, _assoc, _position}}, acc ->
+        acc
+
+      {domain_field, {assoc, fk}}, acc when is_atom(assoc) and is_atom(fk) ->
         Map.put(acc, domain_field, ids_from_assoc(Map.get(acc, assoc), fk))
 
       {_domain_field, assoc}, acc when is_atom(assoc) ->
@@ -134,6 +157,15 @@ defmodule Dobro.Infra.Data.Mappings do
     get_in_container(dto, container, key)
   end
 
+  def get_field(dto, _domain_field, {:spread, mapping}) when is_list(mapping) do
+    result =
+      Map.new(mapping, fn {domain_key, schema_col} ->
+        {domain_key, Map.get(dto, schema_col)}
+      end)
+
+    if Enum.all?(result, fn {_k, v} -> is_nil(v) end), do: nil, else: result
+  end
+
   @doc "Writes a domain field into a DTO using field mappings."
   @spec put_field(map(), atom(), term(), field_mapping()) :: map()
   def put_field(dto, _domain_field, value, schema_field) when is_atom(schema_field) do
@@ -148,14 +180,39 @@ defmodule Dobro.Infra.Data.Mappings do
     put_in_container(dto, container, key, value)
   end
 
+  def put_field(dto, _domain_field, nil, {:spread, mapping}) when is_list(mapping) do
+    Enum.reduce(mapping, dto, fn {_domain_key, schema_col}, acc ->
+      Map.put(acc, schema_col, nil)
+    end)
+  end
+
+  def put_field(dto, _domain_field, value, {:spread, mapping})
+      when is_list(mapping) and is_map(value) do
+    plain = dump_spread_value(value)
+
+    Enum.reduce(mapping, dto, fn {domain_key, schema_col}, acc ->
+      Map.put(acc, schema_col, Map.get(plain, domain_key))
+    end)
+  end
+
   @doc """
   Reads a domain association field from the DTO.
 
   - `{assoc, fk}` — id-list extracted from association rows
   - `assoc` (bare atom) — full row maps for DomainValue / entity `load`
+  - `{:ordered, assoc}` / `{:ordered, assoc, position}` — same as bare atom
   """
   @spec get_association(map(), association_mapping()) :: [term()]
-  def get_association(dto, {assoc, fk}) do
+  def get_association(dto, {:ordered, assoc}) when is_atom(assoc) do
+    get_association(dto, assoc)
+  end
+
+  def get_association(dto, {:ordered, assoc, position})
+      when is_atom(assoc) and is_atom(position) do
+    get_association(dto, assoc)
+  end
+
+  def get_association(dto, {assoc, fk}) when is_atom(assoc) and is_atom(fk) do
     ids_from_assoc(Map.get(dto, assoc), fk)
   end
 
@@ -168,9 +225,33 @@ defmodule Dobro.Infra.Data.Mappings do
 
   - `{assoc, fk}` — id-list becomes `[%{fk => id}, ...]`
   - `assoc` (bare atom) — entity/struct list becomes plain attr maps (via DTO)
+  - `{:ordered, assoc}` / `{:ordered, assoc, position}` — same dump, plus
+    stamps the position field from list index (default `:position`); nil values
+    are dropped from each row so `cast_assoc` does not see `id: nil`
   """
   @spec put_association(map(), [term()], association_mapping()) :: map()
-  def put_association(dto, ids, {assoc, fk}) when is_list(ids) do
+  def put_association(dto, values, {:ordered, assoc})
+      when is_atom(assoc) and is_list(values) do
+    put_association(dto, values, {:ordered, assoc, :position})
+  end
+
+  def put_association(dto, values, {:ordered, assoc, position_field})
+      when is_atom(assoc) and is_atom(position_field) and is_list(values) do
+    rows =
+      values
+      |> Enum.with_index()
+      |> Enum.map(fn {value, index} ->
+        value
+        |> dump_assoc_row()
+        |> reject_nil_values()
+        |> Map.put(position_field, index)
+      end)
+
+    Map.put(dto, assoc, rows)
+  end
+
+  def put_association(dto, ids, {assoc, fk})
+      when is_atom(assoc) and is_atom(fk) and is_list(ids) do
     Map.put(dto, assoc, Enum.map(ids, fn id -> %{fk => id} end))
   end
 
@@ -190,6 +271,8 @@ defmodule Dobro.Infra.Data.Mappings do
     end)
   end
 
+  defp assoc_name({:ordered, assoc}) when is_atom(assoc), do: assoc
+  defp assoc_name({:ordered, assoc, _position}) when is_atom(assoc), do: assoc
   defp assoc_name({assoc, _fk}) when is_atom(assoc), do: assoc
   defp assoc_name(assoc) when is_atom(assoc), do: assoc
 
@@ -207,6 +290,24 @@ defmodule Dobro.Infra.Data.Mappings do
 
   defp dump_assoc_row(%{} = map), do: map
   defp dump_assoc_row(other), do: other
+
+  defp dump_spread_value(%{__struct__: mod} = struct) do
+    if function_exported?(mod, :value, 1) do
+      mod.value(struct)
+    else
+      struct
+      |> Map.from_struct()
+      |> Map.drop([:__meta__])
+    end
+  end
+
+  defp dump_spread_value(%{} = map), do: map
+
+  defp reject_nil_values(%{} = map) do
+    Map.reject(map, fn {_k, v} -> is_nil(v) end)
+  end
+
+  defp reject_nil_values(other), do: other
 
   defp row_attrs(%{__struct__: _} = struct) do
     struct

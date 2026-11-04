@@ -184,10 +184,30 @@ defmodule Dobro.App.Scope do
 
   defp payload_field_names(module) do
     payload_module = Module.get_attribute(module, :payload_module) || module
+    field_names_for(payload_module)
+  end
 
-    payload_module
-    |> Module.get_attribute(:fields, accumulate: true)
-    |> List.wrap()
-    |> Enum.reverse()
+  # Inline `payload do` and named contracts may already be compiled when scope is
+  # validated; only open modules expose accumulate `:fields` attributes.
+  defp field_names_for(payload_module) do
+    if Module.open?(payload_module) do
+      payload_module
+      |> Module.get_attribute(:fields, accumulate: true)
+      |> List.wrap()
+      |> Enum.reverse()
+    else
+      Code.ensure_loaded?(payload_module)
+
+      cond do
+        function_exported?(payload_module, :__fields__, 0) ->
+          payload_module.__fields__()
+
+        function_exported?(payload_module, :__schema__, 0) ->
+          Keyword.keys(payload_module.__schema__())
+
+        true ->
+          []
+      end
+    end
   end
 end

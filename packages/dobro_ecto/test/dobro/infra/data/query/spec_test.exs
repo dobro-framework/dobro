@@ -52,4 +52,15 @@ defmodule Dobro.Infra.Data.Query.SpecTest do
     joins = Spec.joins_for_fields(parallel_spec, [:template_name, :tenant_name])
     assert Enum.map(joins, & &1.name) == [:tenant, :template]
   end
+
+  test "joins_for_fields/2 includes joins required by join_expr fields" do
+    spec = %{
+      @query_spec
+      | fields: %{
+          covered_person_name: {:join_expr, :tenant, {__MODULE__, :name_expr}}
+        }
+    }
+
+    assert Enum.map(Spec.joins_for_fields(spec, [:covered_person_name]), & &1.name) == [:tenant]
+  end
 end

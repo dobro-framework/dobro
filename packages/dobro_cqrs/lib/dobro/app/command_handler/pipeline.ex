@@ -4,6 +4,7 @@ defmodule Dobro.App.CommandHandler.Pipeline do
   domain invocation, and persistence used during command execution.
   """
 
+  alias Dobro.App.Command.Middleware, as: CommandMiddleware
   alias Dobro.App.Command.Strategy
   alias Dobro.App.CommandHandler.State
   alias Dobro.App.ExecutionContext
@@ -33,11 +34,14 @@ defmodule Dobro.App.CommandHandler.Pipeline do
         Pipeline.new(
           state: state,
           input: command,
-          config: %{tenant: nil, schema_module: command, opts: opts}
+          config: pipeline_config(nil, opts)
         )
         |> setup_context()
         |> transform_payload(Keyword.get(opts, :transform_payload))
+        |> init_contract_attrs()
+        |> run_middleware(:before_contract)
         |> build_contract(Keyword.get(opts, :contract))
+        |> run_middleware(:after_contract)
     end
   end
 
@@ -48,11 +52,31 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     Pipeline.new(
       state: state,
       input: command,
-      config: %{execution_context: execution_context, tenant: nil, opts: opts}
+      config: pipeline_config(execution_context, opts)
     )
     |> setup_context()
     |> transform_payload(Keyword.get(opts, :transform_payload))
+    |> init_contract_attrs()
+    |> run_middleware(:before_contract)
     |> build_contract(Keyword.get(opts, :contract))
+    |> run_middleware(:after_contract)
+  end
+
+  defp pipeline_config(nil, opts) do
+    %{
+      tenant: nil,
+      opts: opts,
+      middleware: Keyword.get(opts, :middleware, [])
+    }
+  end
+
+  defp pipeline_config(execution_context, opts) do
+    %{
+      execution_context: execution_context,
+      tenant: nil,
+      opts: opts,
+      middleware: Keyword.get(opts, :middleware, [])
+    }
   end
 
   def run(pipeline, function) do
@@ -78,6 +102,20 @@ defmodule Dobro.App.CommandHandler.Pipeline do
         pipeline
         |> put_in([Access.key(:config), Access.key(:scope_context)], scope_context)
         |> put_in([Access.key(:config), Access.key(:tenant)], tenant)
+        |> then(fn pipeline ->
+          # Keep execution_context.tenant in sync so contract/identity fns see the
+          # normalized tenant without digging into pipeline.config.
+          case Map.get(pipeline.config, :execution_context) do
+            %ExecutionContext{} = ctx ->
+              put_in(pipeline, [Access.key(:config), Access.key(:execution_context)], %{
+                ctx
+                | tenant: tenant
+              })
+
+            _ ->
+              pipeline
+          end
+        end)
 
       {:error, %Error{} = error} ->
         merge_errors(pipeline, error)
@@ -102,7 +140,7 @@ defmodule Dobro.App.CommandHandler.Pipeline do
   def identify(pipeline, opts \\ [])
 
   def identify(%Pipeline{input: _input} = pipeline, opts) do
-    identify_fn = Keyword.get(opts, :identify, :get_by)
+    identify_mode = Keyword.get(opts, :identify, :get_by)
     custom_identify_fn_provided = Keyword.has_key?(opts, :identify)
     identity = pipeline.input.identity
 
@@ -110,11 +148,16 @@ defmodule Dobro.App.CommandHandler.Pipeline do
       if is_nil(identity) do
         nil
       else
-        Keyword.get(opts, :identity_fn, &default_identity_fn(&1, identify_fn))
+        Keyword.get(opts, :identity_fn) ||
+          fn id, _ctx -> default_identity_fn(id, identify_mode) end
       end
 
     bind(pipeline, fn pipeline ->
-      resolved_identity = if identity_fn, do: identity_fn.(identity), else: {:ok, nil}
+      execution_context =
+        Map.get(pipeline.config, :execution_context) || %ExecutionContext{}
+
+      resolved_identity =
+        if identity_fn, do: identity_fn.(identity, execution_context), else: {:ok, nil}
 
       if is_nil(identity) and not custom_identify_fn_provided do
         pipeline
@@ -151,7 +194,8 @@ defmodule Dobro.App.CommandHandler.Pipeline do
   end
 
   @doc """
-  Standard command path: specify → identify → execute_aggregate → put_command_result → finalize.
+  Standard command path: specify → identify → before_execute → execute_aggregate →
+  after_execute → put_command_result → finalize.
 
   Prefer the short-form `execute_command/2` macro from `use Dobro.App.CommandHandler`
   in handlers; call this arity when you need an explicit aggregate or handler module.
@@ -162,9 +206,16 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     pipeline
     |> specify(specifications)
     |> identify(pipeline.config.opts)
+    |> run_middleware(:before_execute)
     |> execute_aggregate(call_fn, aggregate_module, pipeline.config.opts, handler_module)
+    |> run_middleware(:after_execute)
     |> put_command_result()
     |> finalize([:result, :version, :events])
+  end
+
+  @doc "Runs command middleware registered for `phase`."
+  def run_middleware(%Pipeline{} = pipeline, phase) when is_atom(phase) do
+    CommandMiddleware.run(pipeline, phase)
   end
 
   @doc """
@@ -287,6 +338,15 @@ defmodule Dobro.App.CommandHandler.Pipeline do
 
   def transform_payload(pipeline, _), do: pipeline
 
+  @doc """
+  Initialises `state.contract_attrs` from the (possibly transformed) payload as a plain map.
+  """
+  def init_contract_attrs(pipeline) do
+    bind(pipeline, fn pipeline ->
+      put_in(pipeline.state.contract_attrs, payload_to_attrs(pipeline.input.payload))
+    end)
+  end
+
   def transform_result(pipeline, transform_fn) when is_function(transform_fn) do
     bind(pipeline, fn pipeline ->
       put_in(pipeline.state.result, transform_fn.(pipeline.state.result))
@@ -299,16 +359,32 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     put_in(pipeline.state.contract, contract)
   end
 
-  def build_contract(pipeline, contract_module \\ nil) do
-    if contract_module do
-      bind(pipeline, &put_built_contract(&1, contract_module))
-    else
-      put_contract(pipeline, pipeline.input.payload)
-    end
+  @doc """
+  Builds the domain contract onto the pipeline from `state.contract_attrs`.
+
+  `contract` may be:
+
+  - `nil` — use the command payload as-is
+  - a module — `Module.new(contract_attrs)`
+  - an arity-2 function — `fun.(contract_attrs, execution_context)` returning
+    `{:ok, contract} | {:error, term}`
+  """
+  def build_contract(pipeline, contract \\ nil)
+
+  def build_contract(pipeline, nil) do
+    put_contract(pipeline, pipeline.input.payload)
+  end
+
+  def build_contract(pipeline, contract_module) when is_atom(contract_module) do
+    bind(pipeline, &put_built_contract(&1, contract_module))
+  end
+
+  def build_contract(pipeline, contract_fn) when is_function(contract_fn, 2) do
+    bind(pipeline, &put_built_contract_fn(&1, contract_fn))
   end
 
   defp put_built_contract(pipeline, contract_module) do
-    case contract_module.new(pipeline.input.payload) do
+    case contract_module.new(pipeline.state.contract_attrs) do
       {:ok, built_contract} ->
         put_contract(pipeline, built_contract)
 
@@ -317,8 +393,29 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     end
   end
 
+  defp put_built_contract_fn(pipeline, contract_fn) do
+    execution_context =
+      Map.get(pipeline.config, :execution_context) || %ExecutionContext{}
+
+    case contract_fn.(pipeline.state.contract_attrs, execution_context) do
+      {:ok, built_contract} ->
+        put_contract(pipeline, built_contract)
+
+      {:error, error} ->
+        merge_errors(pipeline, error)
+    end
+  end
+
+  defp payload_to_attrs(%_{} = payload), do: Map.from_struct(payload)
+  defp payload_to_attrs(%{} = payload), do: payload
+  defp payload_to_attrs(payload), do: %{value: payload}
+
   defp apply_resolved_identity(pipeline, {:ok, identity}) do
     put_in(pipeline.state.identity, identity)
+  end
+
+  defp apply_resolved_identity(pipeline, {:error, %Error{} = error}) do
+    merge_errors(pipeline, error)
   end
 
   defp apply_resolved_identity(pipeline, {:error, missing}) do

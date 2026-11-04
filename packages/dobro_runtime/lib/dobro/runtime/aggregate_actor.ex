@@ -23,6 +23,7 @@ defmodule Dobro.Runtime.AggregateActor do
       field :identity, map()
       field :tenant, TenantContext.t()
       field :load_fn, atom()
+      field :load_mode, atom(), default: :required
       field :persistence_strategy, atom()
       field :actor_key, term()
       field :holds_lock, boolean(), default: false
@@ -49,6 +50,7 @@ defmodule Dobro.Runtime.AggregateActor do
     identity = Keyword.fetch!(opts, :identity)
     tenant = Keyword.fetch!(opts, :tenant)
     load_fn = Keyword.get(opts, :load_fn, :get_by)
+    load_mode = Keyword.get(opts, :load, :required)
     persistence_strategy = Keyword.get(opts, :persistence_strategy, :stateful)
     actor_key = Keyword.fetch!(opts, :actor_key)
     name = Keyword.get(opts, :name, ActorRegistry.via(actor_key))
@@ -59,6 +61,7 @@ defmodule Dobro.Runtime.AggregateActor do
         identity: identity,
         tenant: tenant,
         load_fn: load_fn,
+        load_mode: load_mode,
         persistence_strategy: persistence_strategy,
         actor_key: actor_key,
         holds_lock: false
@@ -116,7 +119,8 @@ defmodule Dobro.Runtime.AggregateActor do
            state.config.load_fn,
            state.config.identity,
            state.config.tenant,
-           persistence_strategy: state.config.persistence_strategy
+           persistence_strategy: state.config.persistence_strategy,
+           load: state.config.load_mode
          ) do
       {:ok, unit_of_work} ->
         state =
@@ -258,10 +262,21 @@ defmodule Dobro.Runtime.AggregateActor do
          strategies
        ) do
     alias Dobro.App.Command.Commit
+    alias Dobro.App.Command.EventEnrichment
 
-    case apply(config.aggregate_module, aggregate_fn, [unit_of_work.aggregate, contract]) do
+    call_args =
+      if is_nil(unit_of_work.aggregate) do
+        [contract]
+      else
+        [unit_of_work.aggregate, contract]
+      end
+
+    case apply(config.aggregate_module, aggregate_fn, call_args) do
       {:ok, result} ->
-        unit_of_work = %{unit_of_work | aggregate: result.value}
+        aggregate =
+          EventEnrichment.stamp_identity(result.value, config.identity)
+
+        unit_of_work = %{unit_of_work | aggregate: aggregate}
 
         case Commit.run(
                strategies,

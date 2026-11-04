@@ -13,11 +13,18 @@ defmodule Dobro.Infra.Data.WriteRepo.Mappings do
 
   When only `mapper:` is set, imports that module's `to_domain/2` and `to_changeset/2`.
   Otherwise imports `DefaultMapper`.
+
+  Optional `preloads:` (list of assoc atoms) is merged with association mapping
+  preloads — useful when a custom `:mapper` still needs `has_many` rows loaded
+  for round-trip to the domain.
   """
   def resolve(opts, repo_module) do
     mappings = Mappings.normalize(Keyword.get(opts, :mappings))
     explicit_mapper = Keyword.get(opts, :mapper)
-    preloads = Mappings.preload_names(mappings)
+
+    preloads =
+      (Mappings.preload_names(mappings) ++ List.wrap(Keyword.get(opts, :preloads, [])))
+      |> Enum.uniq()
 
     cond do
       mappings.fields == %{} and mappings.associations == %{} ->

@@ -35,6 +35,18 @@ defmodule Dobro.Pipeline do
   def bind(%{} = pipeline, _fun), do: pipeline
 
   @doc """
+  Runs a list of mutate-style hooks `(pipeline -> pipeline)` via `bind/2`.
+
+  Short-circuits when the pipeline already has errors (same as `bind/2`).
+  Does not know about phases — callers filter and pass the list for one site.
+  """
+  def run_hooks(%{} = pipeline, hooks) when is_list(hooks) do
+    Enum.reduce(hooks, pipeline, fn hook, acc ->
+      bind(acc, hook)
+    end)
+  end
+
+  @doc """
   Runs a pipeline step that may fail.
 
   `fun` receives the pipeline and must return:
@@ -43,7 +55,7 @@ defmodule Dobro.Pipeline do
     * `{:error, error}` — add `error` (or a list of errors) and short-circuit
 
   Useful when a step both validates and produces data for later steps
-  (unlike `precondition/2`, which only gates).
+  (unlike `Dobro.State.precondition/2`, which only gates over `state` + `input`).
   """
   def step(%{} = pipeline, fun) when is_function(fun, 1) do
     bind(pipeline, fn pipeline ->

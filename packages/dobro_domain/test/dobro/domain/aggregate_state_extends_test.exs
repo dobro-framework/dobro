@@ -49,6 +49,6 @@ defmodule Dobro.Domain.AggregateStateExtendsTest do
     assert :version in fields
     assert :id in fields
     assert :name in fields
-    assert ExtendsOnly.__identity_field__() == :id
+    assert ExtendsOnly.__identity_fields__() == [:id]
   end
 end

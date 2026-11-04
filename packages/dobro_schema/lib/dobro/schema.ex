@@ -44,6 +44,17 @@ defmodule Dobro.Schema do
   Define the parent before any child that extends it. `defcontract` is built on
   `defschema` and adds `new`/`cast`.
 
+  ## Field options
+
+  Common opts on `field/3`:
+
+  - `required: true` — reject nil / empty string / empty list
+  - `trim: true` — trim leading/trailing whitespace on assign (strings only);
+    blank-after-trim becomes absent like `""` (opt-in; not applied on hydrate)
+  - `validate: [...]` — primitive validators (e.g. `:presence`, `{:min_length, n}`)
+  - `immutable: true` — reject assign after creation
+  - `default: value` — struct default
+
   ## Inline nested schemas
 
   For one-off nested shapes (Ecto-style embeds), pass a `do` block to `field/3`:

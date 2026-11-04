@@ -6,6 +6,21 @@ defmodule Dobro.App.Api do
   alias Dobro.App.Api.Pipeline
   alias Dobro.App.{ExecutionContext, ResultCaster}
 
+  @default_api_middleware [
+    Dobro.App.Api.Middleware.Logger,
+    Dobro.App.Api.Middleware.Auth
+  ]
+
+  @doc """
+  Default route middleware.
+
+  Resolved at runtime from `Application.get_env(:dobro_cqrs, :api_middleware, …)`
+  so hosts can override without touching every route. Falls back to Logger + Auth.
+  """
+  def default_middleware do
+    Application.get_env(:dobro_cqrs, :api_middleware, @default_api_middleware)
+  end
+
   defmacro __using__(opts \\ []) do
     context = Keyword.get(opts, :context)
     port = Keyword.fetch!(opts, :port)
@@ -113,7 +128,8 @@ defmodule Dobro.App.Api do
     returning = Keyword.get(opts, :returning)
     wait_for = Keyword.get(opts, :wait_for)
     query_mod = Keyword.get(opts, :query)
-    middleware = Keyword.get(opts, :middleware, [])
+    middleware_override? = Keyword.has_key?(opts, :middleware)
+    middleware = Keyword.get(opts, :middleware)
     description = Keyword.get(opts, :description)
     explicit_result = expand_result(Keyword.get(opts, :result), __CALLER__)
 
@@ -189,12 +205,19 @@ defmodule Dobro.App.Api do
         var!(args) = args
         var!(context) = context
 
+        middleware =
+          if unquote(middleware_override?) do
+            unquote(middleware)
+          else
+            Dobro.App.Api.default_middleware()
+          end
+
         Pipeline.execute(
           Pipeline.PipelineContext.new(%{
             name: {unquote(env.module), unquote(name)},
             type: unquote(type),
             policy: unquote(policy),
-            middleware: unquote(middleware),
+            middleware: middleware,
             args: args,
             run: fn -> unquote(run) end
           }),

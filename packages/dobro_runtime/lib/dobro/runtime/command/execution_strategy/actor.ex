@@ -37,7 +37,8 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
            aggregate_module,
            pipeline.config.tenant,
            pipeline.state.identity,
-           persistence_strategy: persistence_shorthand(strategies)
+           persistence_strategy: persistence_shorthand(strategies),
+           load: load_mode(pipeline)
          ) do
       {:ok, pid} ->
         case AggregateActor.execute(
@@ -61,6 +62,18 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
       {:error, error} ->
         merge_errors(pipeline, error)
     end
+  end
+
+  defp load_mode(%Pipeline{} = pipeline) do
+    Keyword.get_lazy(pipeline.config.opts, :load, fn ->
+      command_module = pipeline.input.__struct__
+
+      if function_exported?(command_module, :__load_mode__, 0) do
+        command_module.__load_mode__()
+      else
+        :required
+      end
+    end)
   end
 
   defp persistence_shorthand(%Strategy{persistence: {Dobro.App.Command.PersistenceStrategy.Stateful, _}}),

@@ -126,6 +126,43 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
     assert function_exported?(NoBlockExistsRepo, :item_exists?, 1)
   end
 
+  defmodule EnrichPort do
+    use Dobro.Spec.Port
+    @callback get_item(map(), term()) :: {:ok, term()} | {:error, term()}
+  end
+
+  defmodule EnrichLoader do
+    def load(_ids, _context), do: %{}
+  end
+
+  defmodule EnrichRepo do
+    use Dobro.Infra.Data.ReadRepo,
+      port: Dobro.Infra.Data.Query.DefinitionTest.EnrichPort,
+      schema: Dobro.Ecto.Test.Schemas.CategorySchema,
+      tenant_strategy: nil
+
+    defquery GetItem, type: :one do
+      fields [:id, :name]
+
+      enrich :tenant,
+        key: :id,
+        into: :option,
+        with: {Dobro.Infra.Data.Query.DefinitionTest.EnrichLoader, :load}
+    end
+  end
+
+  test "compiles enrich decls onto the query spec" do
+    assert [
+             %{
+               path: [:tenant],
+               key: :id,
+               into: :option,
+               with: {EnrichLoader, :load}
+             }
+           ] = EnrichRepo.GetItem.__spec__().enriches
+  end
+
+
   defmodule AsOverridePort do
     use Dobro.Spec.Port
     @callback custom_list(map(), term()) :: {:ok, term()} | {:error, term()}

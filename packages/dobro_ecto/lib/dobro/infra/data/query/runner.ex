@@ -4,7 +4,7 @@ defmodule Dobro.Infra.Data.Query.Runner do
   """
 
   alias Dobro.Infra.Data.Mappings
-  alias Dobro.Infra.Data.Query.{Exists, FacetRunner, ListRunner, One}
+  alias Dobro.Infra.Data.Query.{Enrich, Exists, FacetRunner, ListRunner, One, Spec}
 
   @doc """
   Runs `query_module` defined on `repo_module` with `args` and optional context.
@@ -23,21 +23,36 @@ defmodule Dobro.Infra.Data.Query.Runner do
         :facet -> FacetRunner.run(repo_module, spec, args, context)
       end
 
-    apply_mappings(repo_module, result, spec.type)
+    result
+    |> apply_enrich(spec, context)
+    |> apply_mappings(repo_module, spec.type)
   end
 
-  defp apply_mappings(repo_module, {:ok, result}, :one) do
+  defp apply_enrich({:ok, result}, %Spec{enriches: enriches}, context)
+       when is_list(enriches) and enriches != [] do
+    {:ok, Enrich.run(result, enriches, context)}
+  end
+
+  defp apply_enrich(other, _spec, _context), do: other
+
+  defp apply_mappings({:ok, result}, repo_module, :one) do
     {:ok, Mappings.apply_to_result(result, repo_mappings(repo_module))}
   end
 
-  defp apply_mappings(repo_module, {:ok, %{entries: entries} = page}, :list) when is_list(entries) do
+  defp apply_mappings({:ok, %{entries: entries} = page}, repo_module, :list)
+       when is_list(entries) do
     mappings = repo_mappings(repo_module)
 
-    {:ok,
-     %{page | entries: Enum.map(entries, &Mappings.apply_to_result(&1, mappings))}}
+    {:ok, %{page | entries: Enum.map(entries, &Mappings.apply_to_result(&1, mappings))}}
   end
 
-  defp apply_mappings(_repo_module, other, _type), do: other
+  defp apply_mappings({:ok, %{items: items} = page}, repo_module, :list) when is_list(items) do
+    mappings = repo_mappings(repo_module)
+
+    {:ok, %{page | items: Enum.map(items, &Mappings.apply_to_result(&1, mappings))}}
+  end
+
+  defp apply_mappings(other, _repo_module, _type), do: other
 
   defp repo_mappings(repo_module) do
     if function_exported?(repo_module, :__mappings__, 0) do
@@ -47,3 +62,4 @@ defmodule Dobro.Infra.Data.Query.Runner do
     end
   end
 end
+

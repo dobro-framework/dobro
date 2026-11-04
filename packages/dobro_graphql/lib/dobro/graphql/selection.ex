@@ -23,14 +23,17 @@ defmodule Dobro.Graphql.Selection do
   def from_projected_fields(projected, resolution, result_module) do
     projected = normalize_projection(projected, resolution)
 
-    case list_item_module(result_module) do
-      nil -> Selection.from_projection(projected, result_module)
-      item_module -> from_list_item_projection(projected, item_module)
+    case list_item_field(result_module) do
+      nil ->
+        Selection.from_projection(projected, result_module)
+
+      {list_field, item_module} ->
+        from_list_item_projection(projected, list_field, item_module)
     end
   end
 
-  defp from_list_item_projection(projected, item_module) do
-    items = Map.get(projected, :items, %{})
+  defp from_list_item_projection(projected, list_field, item_module) do
+    items = Map.get(projected, list_field, %{})
     meta = Map.get(projected, :meta, %{})
 
     meta_fields =
@@ -109,10 +112,23 @@ defmodule Dobro.Graphql.Selection do
     ArgumentError -> String.to_atom(key)
   end
 
-  defp list_item_module(result_module) do
-    case Keyword.fetch(result_module.__schema__(), :items) do
-      {:ok, {%ListOf{of_type: item_module}, _}} -> item_module
-      _ -> nil
+  # Paginated / timeline wrappers expose rows under `:items`. Do not treat
+  # arbitrary `list_of(contract)` fields (e.g. PeopleInvolved.additional_contacts)
+  # as the page — that collapses selection onto the child contract and drops
+  # sibling field exprs like `next_of_kin`.
+  defp list_item_field(result_module) do
+    schema = result_module.__schema__()
+
+    case Keyword.get(schema, :items) do
+      {%ListOf{of_type: item_module}, _} when is_atom(item_module) ->
+        if function_exported?(item_module, :__schema__, 0) do
+          {:items, item_module}
+        else
+          nil
+        end
+
+      _ ->
+        nil
     end
   end
 end

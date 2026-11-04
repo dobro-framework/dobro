@@ -11,7 +11,7 @@ defmodule Dobro.App.Command.PersistenceStrategy.Stateful do
   @impl true
   def persist(unit_of_work, events, tenant, message_identity, _opts) do
     with {:ok, unit_of_work} <- Persist.save(unit_of_work, events, tenant) do
-      enriched = EventEnrichment.enrich(events, message_identity, unit_of_work)
+      enriched = EventEnrichment.enrich(events, message_identity, unit_of_work, tenant)
       {:ok, unit_of_work, enriched}
     end
   end

@@ -79,7 +79,11 @@ defmodule Dobro.State do
 
   def assign_field(%{input: input} = pipeline, field, type, opts)
       when (is_atom(type) or is_struct(type)) and is_list(opts) do
-    value = Map.get(input, field)
+    value =
+      input
+      |> Map.get(field)
+      |> maybe_trim(opts)
+
     apply_field_value(pipeline, value, field, type, opts)
   end
 
@@ -430,9 +434,20 @@ defmodule Dobro.State do
     end
   end
 
-  def precondition(%{} = pipeline, fun) do
+  @doc """
+  Gates the pipeline with a pure check over current `state` and `input`.
+
+  `fun` must be arity 2 and return:
+
+    * `:ok` — continue
+    * `{:error, error}` — add `error` (or a list of errors) and short-circuit
+
+  Unlike `Dobro.Pipeline.step/2`, preconditions cannot rewrite the pipeline —
+  use `step` when the callback must mutate input/state.
+  """
+  def precondition(%{} = pipeline, fun) when is_function(fun, 2) do
     bind(pipeline, fn pipeline ->
-      case fun.(pipeline.state) do
+      case fun.(pipeline.state, pipeline.input) do
         :ok -> pipeline
         {:error, error} -> add_error(pipeline, error)
       end
@@ -473,7 +488,7 @@ defmodule Dobro.State do
 
   defp reduce_list_field(pipeline, values, field, of_type, opts) do
     Enum.reduce(values, pipeline, fn value, pipeline ->
-      apply_field_value(pipeline, value, field, of_type, opts)
+      apply_field_value(pipeline, maybe_trim(value, opts), field, of_type, opts)
     end)
   end
 
@@ -515,6 +530,14 @@ defmodule Dobro.State do
   defp null_value?(nil), do: true
   defp null_value?(""), do: true
   defp null_value?(_), do: false
+
+  # Opt-in via `field :name, :string, trim: true`. Runs on assign only (not hydrate),
+  # so blank-after-trim (`"   "` → `""`) uses the existing empty-string → absent path.
+  defp maybe_trim(value, opts) when is_binary(value) do
+    if Keyword.get(opts, :trim, false), do: String.trim(value), else: value
+  end
+
+  defp maybe_trim(value, _opts), do: value
 
   defp merge_accumulated_errors(pipeline, field, opts, errors) do
     if Keyword.get(opts, :accumulate, false) do

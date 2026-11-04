@@ -14,27 +14,27 @@ defmodule Dobro.Infra.Data.Query.One do
       spec
       |> build_queryable(repo_module, args, context)
       |> apply_id_filter(spec, id)
-      |> prepare_query(spec, selection)
+      |> prepare_query(spec, selection, context)
 
     case repo_module.one(queryable, strategy_opts) do
       {:ok, result} when not is_nil(selection) ->
-        {:ok, postload_associations(result, spec.schema, spec.preloads, selection)}
+        {:ok, postload_associations(result, spec.schema, spec.preloads, selection, context)}
 
       other ->
         other
     end
   end
 
-  defp prepare_query(queryable, spec, nil) do
-    Helpers.apply_preloads(queryable, spec.preloads, nil)
+  defp prepare_query(queryable, spec, nil, context) do
+    Helpers.apply_preloads(queryable, spec.preloads, nil, context)
   end
 
-  defp prepare_query(queryable, spec, selection) do
+  defp prepare_query(queryable, spec, selection, context) do
     if Helpers.selection_covered_by_spec?(selection, spec) do
-      maybe_apply_projection(queryable, spec, selection)
+      maybe_apply_projection(queryable, spec, selection, context)
     else
       # Selection includes non-repo fields (e.g. GraphQL `:content`) — load the full row.
-      Helpers.apply_preloads(queryable, spec.preloads, nil)
+      Helpers.apply_preloads(queryable, spec.preloads, nil, context)
     end
   end
 
@@ -64,10 +64,11 @@ defmodule Dobro.Infra.Data.Query.One do
     end
   end
 
-  defp maybe_apply_projection(queryable, %{fields: fields}, _selection) when map_size(fields) == 0,
-    do: queryable
+  defp maybe_apply_projection(queryable, %{fields: fields}, _selection, _context)
+       when map_size(fields) == 0,
+       do: queryable
 
-  defp maybe_apply_projection(queryable, spec, selection) do
+  defp maybe_apply_projection(queryable, spec, selection, context) do
     preloads = selected_preloads(spec.preloads, selection)
 
     needed =
@@ -76,22 +77,24 @@ defmodule Dobro.Infra.Data.Query.One do
       |> Kernel.++(foreign_keys_for_preloads(spec.schema, preloads))
       |> Enum.uniq()
 
+    # Map `select` cannot combine with query `preload` — associations are
+    # postloaded into the result map after fetch (see postload_associations/5).
     queryable
-    |> Helpers.apply_joins(spec, needed)
+    |> Helpers.apply_joins(spec, needed, context)
     |> Helpers.apply_select(spec.fields, needed)
   end
 
-  defp postload_associations(result, schema, preloads, selection) do
+  defp postload_associations(result, schema, preloads, selection, context) do
     Enum.reduce(preloads, result, fn preload_spec, acc ->
       if Helpers.preload_selected?(preload_spec.name, selection) do
-        load_assoc_into_map(acc, schema, preload_spec, selection)
+        load_assoc_into_map(acc, schema, preload_spec, selection, context)
       else
         acc
       end
     end)
   end
 
-  defp load_assoc_into_map(result, root_schema, %{name: name} = preload_spec, selection) do
+  defp load_assoc_into_map(result, root_schema, %{name: name} = preload_spec, selection, context) do
     case root_schema.__schema__(:association, name) do
       %Ecto.Association.BelongsTo{owner_key: owner_key, related_key: related_key} ->
         case Map.get(result, owner_key) do
@@ -99,13 +102,34 @@ defmodule Dobro.Infra.Data.Query.One do
             Map.put(result, name, nil)
 
           fk ->
+            prefix = Helpers.resolve_prefix(Map.get(preload_spec, :prefix), context)
+            repo_opts = Helpers.prefix_repo_opts(prefix)
+
             assoc =
               preload_spec
-              |> Helpers.assoc_preload_query(selection)
+              |> Helpers.assoc_preload_query(selection, context)
               |> where([row], field(row, ^related_key) == ^fk)
-              |> Dobro.Infra.Repo.one()
+              |> then(fn q -> Dobro.Infra.Repo.one(q, repo_opts) end)
 
             Map.put(result, name, assoc)
+        end
+
+      %Ecto.Association.Has{owner_key: owner_key, related_key: related_key} ->
+        case Map.get(result, owner_key) do
+          nil ->
+            Map.put(result, name, [])
+
+          fk ->
+            prefix = Helpers.resolve_prefix(Map.get(preload_spec, :prefix), context)
+            repo_opts = Helpers.prefix_repo_opts(prefix)
+
+            rows =
+              preload_spec
+              |> Helpers.assoc_preload_query(selection, context)
+              |> where([row], field(row, ^related_key) == ^fk)
+              |> then(fn q -> Dobro.Infra.Repo.all(q, repo_opts) end)
+
+            Map.put(result, name, rows)
         end
 
       _ ->
@@ -123,6 +147,7 @@ defmodule Dobro.Infra.Data.Query.One do
     Enum.flat_map(preloads, fn %{name: name} ->
       case schema.__schema__(:association, name) do
         %Ecto.Association.BelongsTo{owner_key: key} -> [key]
+        %Ecto.Association.Has{owner_key: key} -> [key]
         _ -> []
       end
     end)

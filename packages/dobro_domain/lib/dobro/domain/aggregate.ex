@@ -8,10 +8,26 @@ defmodule Dobro.Domain.Aggregate do
 
   ## Options
 
-    * `:identity` — atom naming the identity field (default `:id`). Injected into
-      `state` as `immutable: true` unless already declared. See `__identity_field__/0`.
     * `:persistence_strategy` — optional per-aggregate override (`:stateful` /
       `:event_sourced`).
+
+  ## Identity
+
+  Declare identity fields with `identity do` (same shape as command identity).
+  Omitted → default `field :id, :id`. Identity fields are injected into `state`
+  as `immutable: true` and must not be redeclared there.
+
+      use Dobro.Domain.Aggregate
+
+      identity do
+        field :case_id, :id
+      end
+
+      state do
+        field :tenant_id, :id, required: true
+      end
+
+  See `__identity_fields__/0`.
 
   See the [package README](readme.html) for a complete guide with examples.
   """
@@ -32,21 +48,33 @@ defmodule Dobro.Domain.Aggregate do
 
   defmacro __using__(opts \\ []) do
     persistence_strategy = Keyword.get(opts, :persistence_strategy)
-    identity_field = Keyword.get(opts, :identity, :id)
 
-    unless is_atom(identity_field) and not is_nil(identity_field) do
-      raise ArgumentError,
-            "Dobro.Domain.Aggregate identity: must be an atom, got: #{inspect(identity_field)}"
+    if Keyword.has_key?(opts, :identity) do
+      raise ArgumentError, """
+      Dobro.Domain.Aggregate no longer accepts identity: on use/1.
+
+      Declare identity with an identity do block instead:
+
+          use Dobro.Domain.Aggregate
+
+          identity do
+            field :id, :id
+          end
+
+      Or omit identity do to default to field :id, :id.
+      """
     end
 
-    # Set during expansion so `state` can read it later in the module body.
-    Module.put_attribute(__CALLER__.module, :dobro_identity_field, identity_field)
+    # Defaults until `identity do` runs (must appear before `state`).
+    Module.put_attribute(__CALLER__.module, :dobro_identity_fields, [{:id, :id}])
+    Module.put_attribute(__CALLER__.module, :dobro_identity_declared, false)
 
     quote location: :keep do
       use Invariants
       use Schema
       import Dobro.State
       import Dobro.Pipeline
+      import Dobro.Domain.Aggregate
       import Dobro.Domain.Aggregate.EventMacros
       import Dobro.Domain.Aggregate.StateMacros
       use Dobro.Contract
@@ -56,21 +84,62 @@ defmodule Dobro.Domain.Aggregate do
 
       def __stream_name__, do: "#{__MODULE__}_events"
       def __persistence_strategy__, do: @persistence_strategy
-      def __identity_field__, do: unquote(identity_field)
     end
   end
+
+  @doc """
+  Declares the aggregate's identity fields (sole declaration — not on `state`).
+
+  Must appear before `state`. Default when omitted is `field :id, :id`.
+  """
+  defmacro identity(do: block) do
+    fields = parse_identity_fields(block, __CALLER__)
+
+    if fields == [] do
+      raise ArgumentError, "identity do must declare at least one field"
+    end
+
+    Module.put_attribute(__CALLER__.module, :dobro_identity_fields, fields)
+    Module.put_attribute(__CALLER__.module, :dobro_identity_declared, true)
+
+    quote do
+      # Identity recorded on module attributes for `state` injection / before_compile.
+      :ok
+    end
+  end
+
+  defp parse_identity_fields(block, env) do
+    block
+    |> block_expressions()
+    |> Enum.flat_map(fn
+      {:field, _meta, [name, type | _rest]} when is_atom(name) ->
+        type = Macro.expand(type, env)
+        [{name, type}]
+
+      {:field, meta, _args} ->
+        raise ArgumentError,
+              "identity field requires name and type, got: #{Macro.to_string({:field, meta, []})}"
+
+      other ->
+        raise ArgumentError,
+              "identity do only accepts field/2 lines, got: #{Macro.to_string(other)}"
+    end)
+  end
+
+  defp block_expressions({:__block__, _, expressions}), do: expressions
+  defp block_expressions(nil), do: []
+  defp block_expressions(expression), do: [expression]
 
   defmodule StateMacros do
     @moduledoc """
     Macros for defining state.
 
     Accepts `extends:` (same semantics as `Dobro.Schema.schema/2`). Extended
-    fields are inserted after `:version` (and the identity field) and before the
+    fields are inserted after `:version` (and identity fields) and before the
     `state` block so those framework fields stay first.
 
-    The identity field (from `use Dobro.Domain.Aggregate, identity: ...`, default
-    `:id`) is injected as `immutable: true` unless the `state` block already
-    declares it.
+    Identity fields (from `identity do`, default `:id`) are injected as
+    `immutable: true`. Redeclaring them in `state` or an extended schema is an error.
 
     When only extending a parent schema (no extra fields), omit the `do` block:
 
@@ -90,7 +159,8 @@ defmodule Dobro.Domain.Aggregate do
 
     defp build_state(opts, block, env) do
       {extends, schema_opts} = Keyword.pop(opts, :extends)
-      identity_field = Module.get_attribute(env.module, :dobro_identity_field) || :id
+      identity_fields = Module.get_attribute(env.module, :dobro_identity_fields) || [{:id, :id}]
+      identity_names = Enum.map(identity_fields, &elem(&1, 0))
 
       field_names =
         block
@@ -100,21 +170,25 @@ defmodule Dobro.Domain.Aggregate do
           _ -> []
         end)
 
-      inject_identity? = identity_field not in field_names
-      # When injecting, exclude the identity field from extends so the parent
-      # does not also contribute a duplicate field.
-      except =
-        if inject_identity?,
-          do: Enum.uniq([identity_field | field_names]),
-          else: field_names
+      redeclared = Enum.filter(identity_names, &(&1 in field_names))
+
+      if redeclared != [] do
+        raise CompileError,
+          description:
+            "identity field(s) #{inspect(redeclared)} must not be declared in state — " <>
+              "declare them only in identity do",
+          file: env.file,
+          line: env.line
+      end
+
+      # Exclude identity from extends so a parent Fields schema cannot contribute them.
+      except = Enum.uniq(identity_names ++ field_names)
 
       identity_ast =
-        if inject_identity? do
+        for {name, type} <- identity_fields do
           quote do
-            field unquote(identity_field), :id, immutable: true
+            field unquote(name), unquote(type), immutable: true
           end
-        else
-          nil
         end
 
       body =
@@ -122,7 +196,7 @@ defmodule Dobro.Domain.Aggregate do
           nil ->
             quote do
               field :version, :integer, required: true
-              unquote(identity_ast)
+              unquote_splicing(identity_ast)
               unquote(block)
             end
 
@@ -131,7 +205,7 @@ defmodule Dobro.Domain.Aggregate do
 
             quote do
               field :version, :integer, required: true
-              unquote(identity_ast)
+              unquote_splicing(identity_ast)
               extend(unquote(parent), except: unquote(except))
               unquote(block)
             end
@@ -177,9 +251,15 @@ defmodule Dobro.Domain.Aggregate do
     end
   end
 
-  defmacro __before_compile__(_env) do
+  defmacro __before_compile__(env) do
+    identity_fields = Module.get_attribute(env.module, :dobro_identity_fields) || [{:id, :id}]
+    identity_names = Enum.map(identity_fields, &elem(&1, 0))
+
     quote location: :keep do
       alias Dobro.Domain.Aggregate.Helpers
+
+      @doc "Identity field names for this aggregate (always a list)."
+      def __identity_fields__, do: unquote(identity_names)
 
       def pipeline(%{} = input), do: Helpers.pipeline(__MODULE__, input)
 

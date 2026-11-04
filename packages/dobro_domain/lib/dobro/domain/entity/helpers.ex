@@ -61,7 +61,7 @@ defmodule Dobro.Domain.Entity.Helpers do
   def cast(entity_module, %Pipeline{} = pipeline) do
     pipeline
     |> validate(entity_module.__schema__())
-    |> precondition(fn state -> entity_module.check_invariants(state) end)
+    |> precondition(fn state, _input -> entity_module.check_invariants(state) end)
     |> bind(fn pipeline ->
       put_in(pipeline.state, %{
         pipeline.state

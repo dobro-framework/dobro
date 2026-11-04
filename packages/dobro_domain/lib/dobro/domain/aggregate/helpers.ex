@@ -77,7 +77,7 @@ defmodule Dobro.Domain.Aggregate.Helpers do
   def verify(aggregate_module, %Pipeline{} = pipeline) do
     pipeline
     |> validate(aggregate_module.__schema__())
-    |> precondition(fn state -> aggregate_module.check_invariants(state) end)
+    |> precondition(fn state, _input -> aggregate_module.check_invariants(state) end)
   end
 
   def unhandled_apply(aggregate_module, aggregate, event) do
@@ -178,12 +178,12 @@ defmodule Dobro.Domain.Aggregate.Helpers do
   defp maybe_transform_payload(attrs, _aggregate, _), do: attrs
 
   defp maybe_put_aggregate_id(attrs, %{__struct__: mod} = aggregate) do
-    field = mod.__identity_field__()
-
-    case Map.get(aggregate, field) do
-      nil -> attrs
-      id -> Map.put(attrs, field, id)
-    end
+    Enum.reduce(mod.__identity_fields__(), attrs, fn field, acc ->
+      case Map.get(aggregate, field) do
+        nil -> acc
+        value -> Map.put(acc, field, value)
+      end
+    end)
   end
 
   defp maybe_put_aggregate_id(attrs, _), do: attrs

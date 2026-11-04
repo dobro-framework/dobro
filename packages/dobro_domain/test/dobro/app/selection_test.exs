@@ -32,14 +32,28 @@ defmodule Dobro.App.SelectionTest do
     end
   end
 
-  test "includes list_of fields when nested projection is present" do
+  test "treats list_of(contract) as an association when nested projection is present" do
     projected = %{id: :leaf, fields: %{from: :leaf, to: :leaf}}
 
     selection = Selection.from_projection(projected, Mapping)
 
     assert MapSet.member?(selection.fields, :id)
-    assert MapSet.member?(selection.fields, :fields)
+    refute MapSet.member?(selection.fields, :fields)
+    assert Map.has_key?(selection.associations, :fields)
+    assert MapSet.member?(selection.associations.fields.fields, :from)
+    assert MapSet.member?(selection.associations.fields.fields, :to)
   end
+
+  test "keeps list_of(scalar) as a scalar field" do
+    projected = %{from: :leaf, to: :leaf}
+
+    selection = Selection.from_projection(projected, MappingField)
+
+    assert MapSet.member?(selection.fields, :from)
+    assert MapSet.member?(selection.fields, :to)
+    assert selection.associations == %{}
+  end
+
 
   test "leaf and nested projections both count as selected scalars" do
     projected = %{name: :leaf}

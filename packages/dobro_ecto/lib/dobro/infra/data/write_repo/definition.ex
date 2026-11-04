@@ -4,10 +4,10 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
   """
 
   alias Dobro.Error
+  alias Dobro.Infra.Data.WriteRepo
   alias Dobro.Infra.Data.WriteRepo.DeleteStrategy
   alias Dobro.Infra.Data.WriteRepo.Mappings
   alias Dobro.Infra.Data.WriteRepo.{Context, UnitOfWork}
-  alias Dobro.Infra.SchemaPrefix
   alias Dobro.Infra.Repo
 
   @doc "Returns quoted write-repo functions for the given `opts`."
@@ -15,11 +15,12 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
     {strategy_module, strategy_opts} = DeleteStrategy.resolve(Keyword.get(opts, :on_delete, :hard_delete))
     repo_module = Keyword.fetch!(opts, :repo_module)
     {mapper_setup_ast, preloads} = Mappings.resolve(opts, repo_module)
+    tenant_strategy_module = strategy_module_for(Keyword.get(opts, :tenant_strategy))
 
     quote do
       unquote(mapper_setup_ast)
 
-      unquote(tenant_functions(opts))
+      unquote(tenant_functions(tenant_strategy_module))
       unquote(mapping_functions(opts))
       unquote(preload_functions(preloads))
       unquote(persistence_functions(opts))
@@ -30,28 +31,24 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
     end
   end
 
-  defp tenant_functions(opts) do
-    if Keyword.get(opts, :tenant_strategy) == :schema do
-      quote do
-        defp repo_opts(%Context{} = context) do
-          SchemaPrefix.repo_opts(context)
-        end
+  defp strategy_module_for(nil), do: WriteRepo.NoTenantStrategy
+  defp strategy_module_for(:tenant_id), do: WriteRepo.TenantIdStrategy
+  defp strategy_module_for(:schema), do: WriteRepo.SchemaStrategy
 
-        defp context_for(opts) do
-          tenant_id = Keyword.get(opts, :tenant_id)
-          tenant_identifier = Keyword.get(opts, :tenant_identifier)
+  defp strategy_module_for(strategy),
+    do: raise("Invalid tenant strategy: #{inspect(strategy)}")
 
-          %Context{
-            tenant: %Dobro.App.Auth.TenantContext{
-              id: tenant_id,
-              identifier: tenant_identifier
-            }
-          }
-        end
+  defp tenant_functions(strategy_module) do
+    quote do
+      @doc "Tenant persistence strategy module (mirrors ReadRepo.strategy/0)."
+      def strategy, do: unquote(strategy_module)
+
+      defp repo_opts(%Context{} = context) do
+        unquote(strategy_module).repo_opts(context)
       end
-    else
-      quote do
-        defp repo_opts(%Context{} = _context), do: {:ok, []}
+
+      defp apply_tenant_to_changeset(changeset, %Context{} = context) do
+        unquote(strategy_module).apply_to_changeset(changeset, context)
       end
     end
   end
@@ -62,11 +59,12 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
     quote do
       def to_changeset(%unquote(aggregate_module){} = aggregate) do
-        identity_field = unquote(aggregate_module).__identity_field__()
-        identity_value = Map.get(aggregate, identity_field)
+        identity_attrs =
+          Enum.map(unquote(aggregate_module).__identity_fields__(), fn field ->
+            {field, Map.get(aggregate, field)}
+          end)
 
-        schema =
-          struct(unquote(schema_module), [{identity_field, identity_value}])
+        schema = struct(unquote(schema_module), identity_attrs)
 
         to_changeset(aggregate, schema)
       end
@@ -112,6 +110,7 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
     quote do
       def insert(%UnitOfWork{aggregate: aggregate}, %Context{} = context) do
         with {:ok, %Ecto.Changeset{} = changeset} <- to_changeset(aggregate),
+             {:ok, changeset} <- apply_tenant_to_changeset(changeset, context),
              {:ok, opts} <- repo_opts(context),
              {:ok, schema} <- Repo.insert(changeset, opts) do
           schema
@@ -127,6 +126,7 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
             %Context{} = context
           ) do
         with {:ok, %Ecto.Changeset{} = changeset} <- to_changeset(aggregate, schema),
+             {:ok, changeset} <- apply_tenant_to_changeset(changeset, context),
              {:ok, opts} <- repo_opts(context) do
           occ? =
             Map.has_key?(schema, :version) and is_integer(schema.version) and
@@ -178,10 +178,12 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
       end
 
       def save(%UnitOfWork{} = unit_of_work, %Context{} = context) do
-        if is_nil(unit_of_work.aggregate.id) do
-          insert(unit_of_work, context)
-        else
-          update(unit_of_work, context)
+        operation =
+          Dobro.Infra.Data.WriteRepo.Operation.resolve(unit_of_work, [])
+
+        case operation do
+          :insert -> insert(unit_of_work, context)
+          _ -> update(unit_of_work, context)
         end
       end
     end

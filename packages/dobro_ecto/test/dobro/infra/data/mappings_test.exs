@@ -38,6 +38,37 @@ defmodule Dobro.Infra.Data.MappingsTest do
       assert "Ada" == Mappings.get_field(%{name: "Ada"}, :display_name, :name)
       assert %{name: "Bob"} == Mappings.put_field(%{}, :display_name, "Bob", :name)
     end
+
+    test "reads and writes spread VO columns" do
+      spread =
+        {:spread, person_id: :next_of_kin_person_id, relationship: :next_of_kin_relationship}
+
+      dto = %{next_of_kin_person_id: 2, next_of_kin_relationship: "Son"}
+
+      assert %{person_id: 2, relationship: "Son"} ==
+               Mappings.get_field(dto, :next_of_kin, spread)
+
+      assert nil ==
+               Mappings.get_field(
+                 %{next_of_kin_person_id: nil, next_of_kin_relationship: nil},
+                 :next_of_kin,
+                 spread
+               )
+
+      assert %{next_of_kin_person_id: 5, next_of_kin_relationship: "Friend"} ==
+               Mappings.put_field(%{}, :next_of_kin, %{person_id: 5, relationship: "Friend"}, spread)
+
+      assert %{next_of_kin_person_id: nil, next_of_kin_relationship: nil} ==
+               Mappings.put_field(dto, :next_of_kin, nil, spread)
+    end
+
+    test "spread put dumps structs via value/1" do
+      spread = {:spread, id: :line_id, quantity: :line_qty}
+      line = %Dobro.Infra.Data.MappingsTest.LineEntity{id: 9, quantity: 4}
+
+      assert %{line_id: 9, line_qty: 4} ==
+               Mappings.put_field(%{}, :line, line, spread)
+    end
   end
 
   describe "association mappings" do
@@ -66,22 +97,58 @@ defmodule Dobro.Infra.Data.MappingsTest do
                Mappings.put_association(%{}, [line], :order_lines)
     end
 
+    test "ordered associations stamp position and drop nils" do
+      contacts = [
+        %{id: nil, person_id: 5, relationship: "Friend"},
+        %{id: 10, person_id: 6, relationship: "Colleague"}
+      ]
+
+      assert %{
+               additional_contacts: [
+                 %{person_id: 5, relationship: "Friend", position: 0},
+                 %{id: 10, person_id: 6, relationship: "Colleague", position: 1}
+               ]
+             } == Mappings.put_association(%{}, contacts, {:ordered, :additional_contacts})
+
+      assert %{
+               additional_contacts: [
+                 %{person_id: 5, relationship: "Friend", sort_order: 0}
+               ]
+             } ==
+               Mappings.put_association(
+                 %{},
+                 [%{person_id: 5, relationship: "Friend"}],
+                 {:ordered, :additional_contacts, :sort_order}
+               )
+
+      dto = %{additional_contacts: [%{id: 1, person_id: 5, relationship: "Friend", position: 0}]}
+
+      assert [%{id: 1, person_id: 5, relationship: "Friend", position: 0}] ==
+               Mappings.get_association(dto, {:ordered, :additional_contacts})
+    end
+
     test "treats not-loaded associations as empty" do
       dto = %{role_links: %Ecto.Association.NotLoaded{}}
       assert [] == Mappings.get_association(dto, {:role_links, :role_id})
       assert [] == Mappings.get_association(dto, :role_links)
+      assert [] == Mappings.get_association(dto, {:ordered, :role_links})
     end
 
-    test "preload_names includes bare-atom associations" do
+    test "preload_names includes bare-atom and ordered associations" do
       mappings =
         Mappings.normalize(
           associations: [
             role_ids: {:role_links, :role_id},
-            lines: :order_lines
+            lines: :order_lines,
+            contacts: {:ordered, :additional_contacts}
           ]
         )
 
-      assert Enum.sort(Mappings.preload_names(mappings)) == [:order_lines, :role_links]
+      assert Enum.sort(Mappings.preload_names(mappings)) == [
+               :additional_contacts,
+               :order_lines,
+               :role_links
+             ]
     end
   end
 
@@ -96,9 +163,16 @@ defmodule Dobro.Infra.Data.MappingsTest do
                Mappings.apply_to_result(result, mappings)
     end
 
-    test "skips bare-atom entity associations" do
-      mappings = Mappings.normalize(associations: [lines: :order_lines])
-      result = %{id: 1, order_lines: [%{id: 2}]}
+    test "skips bare-atom and ordered entity associations" do
+      mappings =
+        Mappings.normalize(
+          associations: [
+            lines: :order_lines,
+            contacts: {:ordered, :additional_contacts}
+          ]
+        )
+
+      result = %{id: 1, order_lines: [%{id: 2}], additional_contacts: [%{id: 3}]}
 
       assert result == Mappings.apply_to_result(result, mappings)
     end

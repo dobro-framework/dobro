@@ -63,7 +63,7 @@ defmodule Dobro.Domain.ValueObject.Helpers do
   def cast(value_object_module, %Pipeline{} = pipeline) do
     pipeline
     |> validate(value_object_module.__schema__())
-    |> precondition(fn state -> value_object_module.check_invariants(state) end)
+    |> precondition(fn state, _input -> value_object_module.check_invariants(state) end)
     |> bind(fn pipeline ->
       put_in(pipeline.state, %{
         pipeline.state

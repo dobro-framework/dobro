@@ -112,6 +112,7 @@ defmodule Dobro.Runtime.AggregateSupervisor do
        identity: identity,
        tenant: tenant,
        persistence_strategy: Keyword.get(opts, :persistence_strategy, :stateful),
+       load: Keyword.get(opts, :load, :required),
        actor_key: key,
        name: ActorRegistry.via(key)}
     )

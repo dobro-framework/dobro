@@ -8,7 +8,7 @@ defmodule Dobro.App.Selection do
 
   use TypedStruct
 
-  alias Dobro.Schema.{ListOf, Types}
+  alias Dobro.Schema.{ListOf, NonNull, Types}
 
   typedstruct do
     field(:fields, MapSet.t(), default: MapSet.new())
@@ -68,7 +68,7 @@ defmodule Dobro.App.Selection do
       if association_type?(type) do
         case Map.get(projected, name) do
           nested when is_map(nested) ->
-            Map.put(acc, name, from_projection(nested, type))
+            Map.put(acc, name, from_projection(nested, association_module(type)))
 
           _ ->
             acc
@@ -86,7 +86,11 @@ defmodule Dobro.App.Selection do
     end
   end
 
-  defp association_type?(%ListOf{}), do: false
+  # list_of(scalar) stays a scalar; list_of(contract/module) is an association
+  # (preload / nested GraphQL selection), same as a singular nested contract.
+  defp association_type?(%ListOf{of_type: of_type}), do: association_type?(unwrap_type(of_type))
+
+  defp association_type?(%NonNull{of_type: of_type}), do: association_type?(of_type)
 
   defp association_type?(type) when is_atom(type) do
     cond do
@@ -100,7 +104,15 @@ defmodule Dobro.App.Selection do
 
   defp association_type?(_), do: false
 
+  defp association_module(%ListOf{of_type: of_type}), do: association_module(unwrap_type(of_type))
+  defp association_module(%NonNull{of_type: of_type}), do: association_module(of_type)
+  defp association_module(type) when is_atom(type), do: type
+
+  defp unwrap_type(%NonNull{of_type: of_type}), do: of_type
+  defp unwrap_type(type), do: type
+
   defp enum_type?(type) do
     match?({:module, _}, Code.ensure_loaded(type)) and Dobro.Enum.enum?(type)
   end
 end
+

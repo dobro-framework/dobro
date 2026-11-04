@@ -227,11 +227,14 @@ An aggregate is the consistency boundary for a cluster of domain objects. All ch
 ### Identity
 
 ```elixir
-use Dobro.Domain.Aggregate                    # identity: :id (default)
-use Dobro.Domain.Aggregate, identity: :uuid
+use Dobro.Domain.Aggregate
+
+identity do
+  field :case_id, :id
+end
 ```
 
-The identity field is injected as `immutable: true` unless `state` already declares it. `__identity_field__/0` is used when copying the root id into event payloads and when seeding WriteRepo inserts. Command `identity do` blocks remain the lookup key for actors / event streams / `get_by` and are independent of this option.
+Omit `identity do` to default to `field :id, :id`. Identity fields are injected as `immutable: true` and must not be redeclared on `state`. `__identity_fields__/0` is used when copying identity into event payloads and when seeding WriteRepo inserts. Command `identity do` blocks remain the lookup key for actors / event streams / `get_by` and must use the same field names.
 
 ### Complete example
 

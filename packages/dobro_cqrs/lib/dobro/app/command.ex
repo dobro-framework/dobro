@@ -10,6 +10,8 @@ defmodule Dobro.App.Command do
       import Dobro.App.Command
 
       Module.register_attribute(__MODULE__, :payload_module, accumulate: false)
+      Module.register_attribute(__MODULE__, :load_mode, accumulate: false)
+      Module.put_attribute(__MODULE__, :load_mode, :required)
 
       defstruct payload: %{},
                 identity: %{},
@@ -17,6 +19,16 @@ defmodule Dobro.App.Command do
                 message_identity: nil
 
       def new(%{} = args), do: Helpers.new(__MODULE__, args)
+
+      @before_compile Dobro.App.Command
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    load_mode = Module.get_attribute(env.module, :load_mode) || :required
+
+    quote do
+      def __load_mode__, do: unquote(load_mode)
     end
   end
 
@@ -31,6 +43,17 @@ defmodule Dobro.App.Command do
       end
 
       def __identity__, do: Identity
+    end
+  end
+
+  @doc """
+  Whether an identified load may miss (`:optional`) or must find the aggregate (`:required`).
+
+  Default is `:required`. Use `load :optional` for create-or-update commands (e.g. Save).
+  """
+  defmacro load(mode) when mode in [:optional, :required] do
+    quote do
+      Module.put_attribute(__MODULE__, :load_mode, unquote(mode))
     end
   end
 

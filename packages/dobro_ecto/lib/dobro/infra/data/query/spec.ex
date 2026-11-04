@@ -21,12 +21,14 @@ defmodule Dobro.Infra.Data.Query.Spec do
     default_order: [],
     count: :exact,
     preloads: [],
+    enriches: [],
     include_global: nil
   ]
 
   @type field_source ::
           {:column, binding :: atom(), field :: atom()}
           | {:join, join :: atom(), field :: atom()}
+          | {:join_expr, join :: atom(), Ecto.Query.DynamicExpr.t() | {module(), atom()}}
           | {:expr, Ecto.Query.DynamicExpr.t() | {module(), atom()}}
 
   @doc """
@@ -41,20 +43,36 @@ defmodule Dobro.Infra.Data.Query.Spec do
     apply(mod, fun, [])
   end
 
+  @type on_left :: atom() | {:expr, Ecto.Query.DynamicExpr.t() | {module(), atom()}}
+
   @type join_spec :: %{
           required(:name) => atom(),
-          required(:assoc) => atom(),
+          required(:assoc) => atom() | nil,
           required(:schema) => module(),
           required(:source) => atom(),
           required(:type) => :inner | :left | :right | :full,
-          required(:on) => {atom(), atom(), atom(), atom()}
+          required(:on) => {atom(), on_left(), atom(), atom()},
+          optional(:prefix) => :tenant | String.t() | nil,
+          optional(:and_not_deleted) => atom() | nil
         }
 
   @type preload :: %{
           required(:name) => atom(),
           required(:schema) => module(),
           optional(:fields) => [atom()] | nil,
-          optional(:preloads) => [preload()]
+          optional(:preloads) => [preload()],
+          optional(:prefix) => :tenant | String.t() | nil
+        }
+
+  @type enrich_loader ::
+          {module(), atom()}
+          | {:query, repo :: module(), query_module :: module()}
+
+  @type enrich :: %{
+          required(:path) => [atom()],
+          required(:key) => atom(),
+          required(:into) => atom(),
+          required(:with) => enrich_loader()
         }
 
   @type t :: %__MODULE__{
@@ -74,6 +92,7 @@ defmodule Dobro.Infra.Data.Query.Spec do
           default_order: [{direction :: :asc | :desc, field :: atom()}],
           count: :exact | :estimated | :skip,
           preloads: [preload()],
+          enriches: [enrich()],
           include_global: boolean() | nil
         }
 
@@ -98,6 +117,7 @@ defmodule Dobro.Infra.Data.Query.Spec do
       |> Enum.reduce(MapSet.new(), fn field, acc ->
         case Map.get(spec.fields, field) do
           {:join, join, _} -> MapSet.put(acc, join)
+          {:join_expr, join, _} -> MapSet.put(acc, join)
           _ -> acc
         end
       end)

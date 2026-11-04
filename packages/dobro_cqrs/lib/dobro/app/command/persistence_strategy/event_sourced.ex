@@ -13,7 +13,7 @@ defmodule Dobro.App.Command.PersistenceStrategy.EventSourced do
 
   @impl true
   def persist(unit_of_work, events, tenant, message_identity, _opts) do
-    enriched = EventEnrichment.enrich(events, message_identity, unit_of_work)
+    enriched = EventEnrichment.enrich(events, message_identity, unit_of_work, tenant)
 
     stream_name =
       EventStore.stream_id(
