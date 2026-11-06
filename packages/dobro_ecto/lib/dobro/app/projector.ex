@@ -8,6 +8,33 @@ defmodule Dobro.App.Projector do
   each emit version `1` on a shared module stream (e.g. notes) without skipping
   later creates, while still ordering versions within a single aggregate
   (e.g. category rename/move).
+
+  ## After-commit effects
+
+  `project/1` runs inside the delivery transaction. Side effects that must not
+  run until the write has committed (Absinthe publishes, PubSub notifies, etc.)
+  should be returned from `project/1`:
+
+      def project(%MyEvent{} = event) do
+        with {:ok, row} <- Repo.insert(...) do
+          {:ok, after_commit: fn -> publish(row) end}
+        end
+      end
+
+  `after_commit` may be a zero-arity function or a list of them. Delivery runs
+  them only after a successful commit. Prefer this over process dictionary
+  stashes or an `after_commit/1` callback.
+
+  When one event projects several rows, return a list of ordinary results —
+  `:ok`, `{:ok, after_commit: ...}`, or `{:error, reason}`. The framework merges
+  their effects (first error wins):
+
+      def project(%MyEvent{} = event) do
+        [
+          project_part(event, :a),
+          project_part(event, :b)
+        ]
+      end
   """
   defmacro __using__(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__) |> to_string()
@@ -112,11 +139,12 @@ defmodule Dobro.App.Projector do
              timeout: @timeout,
              pool_timeout: @timeout
            ) do
-        {:ok, :ok} ->
-          notify_and_ok(module, projection_name, event)
+        {:ok, {:ok, effects}} ->
+          ok_with_notify(module, projection_name, event, effects)
 
         {:ok, {:error, :already_seen_event}} ->
-          notify_and_ok(module, projection_name, event)
+          # Still notify waiters; the read model is already at least this version.
+          ok_with_notify(module, projection_name, event, [])
 
         {:ok, {:error, error}} ->
           {:error, error}
@@ -147,9 +175,9 @@ defmodule Dobro.App.Projector do
       )
     end
 
-    defp notify_and_ok(module, projection_name, event) do
-      notify_projection_updated(module, projection_name, event)
-      :ok
+    defp ok_with_notify(module, projection_name, event, effects) do
+      notify = fn -> notify_projection_updated(module, projection_name, event) end
+      {:ok, after_commit: List.wrap(effects) ++ [notify]}
     end
   end
 end

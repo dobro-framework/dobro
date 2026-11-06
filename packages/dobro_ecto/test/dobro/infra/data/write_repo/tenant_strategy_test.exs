@@ -87,6 +87,26 @@ defmodule Dobro.Infra.Data.WriteRepo.TenantStrategyTest do
              WriteRepo.TenantIdStrategy.apply_to_changeset(changeset, context)
   end
 
+  test "TenantIdStrategy scopes loads to the context tenant" do
+    context = Context.new(tenant: TenantContext.new(%{id: 42, identifier: "acme"}))
+
+    assert {:ok, query} = WriteRepo.TenantIdStrategy.scope(ItemSchema, context)
+    assert [%{expr: expr, params: [{42, _}]}] = query.wheres
+    assert Macro.to_string(expr) =~ "tenant_id"
+  end
+
+  test "TenantIdStrategy refuses to load without a tenant" do
+    assert {:error, %Error{reason: :missing_tenant}} =
+             WriteRepo.TenantIdStrategy.scope(ItemSchema, Context.new(tenant: nil))
+  end
+
+  test "SchemaStrategy and NoTenantStrategy load without a tenant filter" do
+    context = Context.new(tenant: TenantContext.new(%{id: 1, identifier: "acme"}))
+
+    assert {:ok, ItemSchema} = WriteRepo.NoTenantStrategy.scope(ItemSchema, context)
+    assert {:ok, ItemSchema} = WriteRepo.SchemaStrategy.scope(ItemSchema, context)
+  end
+
   test "SchemaStrategy and NoTenantStrategy leave the changeset unchanged" do
     changeset = ItemSchema.changeset(%ItemSchema{}, %{name: "a"})
     context = Context.new(tenant: TenantContext.new(%{id: 1, identifier: "acme"}))

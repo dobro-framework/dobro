@@ -47,6 +47,10 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
         unquote(strategy_module).repo_opts(context)
       end
 
+      defp scoped(queryable, %Context{} = context) do
+        unquote(strategy_module).scope(queryable, context)
+      end
+
       defp apply_tenant_to_changeset(changeset, %Context{} = context) do
         unquote(strategy_module).apply_to_changeset(changeset, context)
       end
@@ -154,13 +158,13 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
             {:error, %Ecto.Changeset{} = cs} ->
               if stale_changeset?(cs) do
-                {:error, Error.new(:concurrent_modification)}
+                {:error, concurrent_modification_error()}
               else
                 {:error, cs}
               end
 
             {:error, :stale} ->
-              {:error, Error.new(:concurrent_modification)}
+              {:error, concurrent_modification_error()}
 
             {:error, error} ->
               {:error, error}
@@ -175,6 +179,12 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
           {:version, {_, opts}} -> Keyword.get(opts, :stale, false) == true
           _ -> false
         end)
+      end
+
+      defp concurrent_modification_error do
+        Error.new(:concurrent_modification,
+          description: "This record was changed by someone else. Please try again."
+        )
       end
 
       def save(%UnitOfWork{} = unit_of_work, %Context{} = context) do
@@ -208,8 +218,9 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
     quote do
       def all(%Context{} = context) do
-        with {:ok, opts} <- repo_opts(context) do
-          Repo.all(unquote(schema_module), opts)
+        with {:ok, opts} <- repo_opts(context),
+             {:ok, queryable} <- scoped(unquote(schema_module), context) do
+          Repo.all(queryable, opts)
           |> Enum.map(&maybe_preload(&1, opts))
           |> Enum.map(&to_unit_of_work/1)
         end
@@ -222,8 +233,9 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
     quote do
       def first(%Context{} = context) do
-        with {:ok, opts} <- repo_opts(context) do
-          case Repo.one(unquote(schema_module), opts) |> maybe_preload(opts) do
+        with {:ok, opts} <- repo_opts(context),
+             {:ok, queryable} <- scoped(unquote(schema_module), context) do
+          case Repo.one(queryable, opts) |> maybe_preload(opts) do
             nil -> {:error, Error.new(:not_found, context: {__MODULE__, :first})}
             schema -> to_unit_of_work(schema)
           end
@@ -237,8 +249,9 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
 
     quote do
       def get(id, %Context{} = context) do
-        with {:ok, opts} <- repo_opts(context) do
-          case Repo.get(unquote(schema_module), id, opts) |> maybe_preload(opts) do
+        with {:ok, opts} <- repo_opts(context),
+             {:ok, queryable} <- scoped(unquote(schema_module), context) do
+          case Repo.get(queryable, id, opts) |> maybe_preload(opts) do
             nil -> {:error, Error.new(:not_found, context: {__MODULE__, :get})}
             schema -> to_unit_of_work(schema)
           end
@@ -246,8 +259,9 @@ defmodule Dobro.Infra.Data.WriteRepo.Definition do
       end
 
       def get_by(%{} = identity, %Context{} = context) do
-        with {:ok, opts} <- repo_opts(context) do
-          case Repo.get_by(unquote(schema_module), identity, opts) |> maybe_preload(opts) do
+        with {:ok, opts} <- repo_opts(context),
+             {:ok, queryable} <- scoped(unquote(schema_module), context) do
+          case Repo.get_by(queryable, identity, opts) |> maybe_preload(opts) do
             nil -> {:error, Error.new(:not_found, context: {__MODULE__, :get_by})}
             schema -> to_unit_of_work(schema)
           end

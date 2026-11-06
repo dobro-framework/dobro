@@ -8,6 +8,33 @@ defmodule Dobro.Contract.Helpers do
   import Dobro.Pipeline
   import Dobro.State
 
+  @doc """
+  Loads a persisted map into a contract struct without running validations.
+
+  Used when rehydrating nested event / schema payloads from storage.
+  """
+  def load(_contract_module, nil), do: {:ok, nil}
+
+  def load(contract_module, %{__struct__: contract_module} = value), do: {:ok, value}
+
+  def load(contract_module, %{} = input) do
+    Pipeline.new(
+      state: %{value: %{}},
+      input: normalize_input(input),
+      config: %{schema_module: contract_module}
+    )
+    |> hydrate_all()
+    |> case do
+      %{errors: []} = pipeline ->
+        {:ok, struct(contract_module, pipeline.state.value)}
+
+      %{errors: errors} ->
+        {:error, errors}
+    end
+  end
+
+  def load(_contract_module, _value), do: {:error, :invalid_load_input}
+
   @doc "Casts `value` into `contract_module`, returning `{:ok, struct}` or `{:error, errors}`."
   def new(contract_module, value) do
     Pipeline.new(

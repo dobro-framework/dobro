@@ -21,4 +21,16 @@ defmodule Dobro.TestSupport.SampleTypedEvents do
       field :contacts, list_of(SampleContact)
     end
   end
+
+  defevent StatusTransitioned do
+    payload do
+      field :id, :id
+      field :lifecycle_status, :string
+      field :occurred_at, :datetime
+
+      field :original, Original do
+        field :lifecycle_status, :string
+      end
+    end
+  end
 end

@@ -5,7 +5,7 @@ defmodule Dobro.Runtime.EventHandlerSupervisor do
   use Supervisor
 
   alias Dobro.Ports.EventHandler
-  alias Dobro.Runtime.EventHandlerActor
+  alias Dobro.Runtime.DomainEventPoller
 
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -14,16 +14,14 @@ defmodule Dobro.Runtime.EventHandlerSupervisor do
   def init(_opts) do
     children =
       EventHandler.all()
-      |> Enum.map(fn event_handler_module ->
-        Supervisor.child_spec(
-          {
-            EventHandlerActor,
-            [
-              event_handler_module: event_handler_module
-            ]
-          },
-          id: "event_handler_actor_#{event_handler_module}"
-        )
+      |> Enum.flat_map(fn handler ->
+        DomainEventPoller.streams(handler)
+        |> Enum.map(fn stream ->
+          Supervisor.child_spec(
+            {DomainEventPoller, [handler: handler, stream: stream]},
+            id: {DomainEventPoller, handler, stream}
+          )
+        end)
       end)
 
     Supervisor.init(children, strategy: :one_for_one)

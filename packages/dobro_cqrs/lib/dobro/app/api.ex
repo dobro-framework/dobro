@@ -41,6 +41,7 @@ defmodule Dobro.App.Api do
       Module.register_attribute(__MODULE__, :commands, accumulate: true)
       Module.register_attribute(__MODULE__, :queries, accumulate: true)
       Module.put_attribute(__MODULE__, :context, unquote(context))
+      Module.put_attribute(__MODULE__, :api_surfaces, unquote(surfaces))
 
       @before_compile {unquote(__MODULE__), :__before_compile__}
     end
@@ -131,6 +132,9 @@ defmodule Dobro.App.Api do
     middleware_override? = Keyword.has_key?(opts, :middleware)
     middleware = Keyword.get(opts, :middleware)
     description = Keyword.get(opts, :description)
+    route_surfaces = List.wrap(Keyword.get(opts, :surfaces, []))
+    api_surfaces = Module.get_attribute(env.module, :api_surfaces) || []
+    effective_surfaces = Enum.uniq(api_surfaces ++ route_surfaces)
     explicit_result = expand_result(Keyword.get(opts, :result), __CALLER__)
 
     {type, query_or_cmd_mod} =
@@ -145,7 +149,12 @@ defmodule Dobro.App.Api do
     result_ast = Macro.escape(result_mod)
 
     route_opts =
-      [returning: returning, result: result_ast, description: description]
+      [
+        returning: returning,
+        result: result_ast,
+        description: description,
+        surfaces: effective_surfaces
+      ]
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
     run =
@@ -269,6 +278,7 @@ defmodule Dobro.App.Api do
       def __queries__, do: @queries
       def __queries__(name), do: Keyword.get(__queries__(), name)
       def __context__, do: @context
+      def __api_surfaces__, do: @api_surfaces
     end
   end
 
@@ -312,6 +322,7 @@ defmodule Dobro.App.Api do
       result_version = result.version
       projection_name = projection_module.__name__()
       causation_id = input.message_identity.id
+      drain_domain_pollers()
 
       receive do
         {:projection_updated, ^projection_name, ^causation_id, version} ->
@@ -327,5 +338,15 @@ defmodule Dobro.App.Api do
     end
 
     def maybe_wait_for(_, _, _), do: :ok
+
+    defp drain_domain_pollers do
+      poller = Module.concat([Dobro.Runtime, DomainEventPoller])
+
+      if Code.ensure_loaded?(poller) and function_exported?(poller, :drain_all, 0) do
+        poller.drain_all()
+      else
+        :ok
+      end
+    end
   end
 end

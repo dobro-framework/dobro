@@ -139,23 +139,32 @@ defmodule Dobro.Graphql.Helpers do
       %AbsintheErrorPayload.ValidationMessage{
         field: path,
         code: reason,
-        message: human_description(description)
+        message: human_description(description, reason)
       }
     end
 
     defp to_validation_message(error) do
       formatted = Errors.to_absinthe_error(error)
+      code = Map.get(formatted, :code)
 
       %AbsintheErrorPayload.ValidationMessage{
         field: Map.get(formatted, :field),
-        code: Map.get(formatted, :code),
-        message: human_description(Map.get(formatted, :message))
+        code: code,
+        message: human_description(Map.get(formatted, :message), code)
       }
     end
 
-    # Only real copy becomes `message`. Reason atoms must not be echoed as
-    # the user-facing message (clients translate via `code`).
-    defp human_description(description) when is_binary(description), do: description
-    defp human_description(_), do: nil
+    # Prefer explicit copy; otherwise fall back to a readable reason so clients
+    # that only select `message` (and do not translate `code`) are not blank.
+    defp human_description(description, _reason) when is_binary(description) and description != "",
+      do: description
+
+    defp human_description(_description, reason) when is_atom(reason) and not is_nil(reason) do
+      reason
+      |> Atom.to_string()
+      |> String.replace("_", " ")
+    end
+
+    defp human_description(_description, _reason), do: nil
   end
 end

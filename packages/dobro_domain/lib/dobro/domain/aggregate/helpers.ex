@@ -191,8 +191,10 @@ defmodule Dobro.Domain.Aggregate.Helpers do
   defp version_events(%Pipeline{} = pipeline) do
     base_version = pipeline.state.value.version
 
+    # `add_event` prepends, so the list is newest first until here.
     versioned_events =
       pipeline.state.events
+      |> Enum.reverse()
       |> Enum.with_index()
       |> Enum.map(fn {event, index} -> version_event(event, base_version + index + 1) end)
 

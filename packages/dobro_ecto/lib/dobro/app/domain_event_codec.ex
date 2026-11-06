@@ -30,6 +30,7 @@ defmodule Dobro.App.DomainEventCodec do
   @spec decode(map()) :: struct()
   def decode(%{"event_type" => event_type} = data) do
     module = event_type |> String.split(".") |> Module.safe_concat()
+    Code.ensure_loaded!(module)
 
     struct(module, %{
       payload: decode_payload(module, data["payload"]),
@@ -80,16 +81,25 @@ defmodule Dobro.App.DomainEventCodec do
   defp decode_message_identity(nil), do: nil
 
   defp decode_message_identity(data) when is_map(data) do
-    MessageIdentity.new!(atomize_keys(data))
+    # Contract.normalize_input atomizes known fields safely (cold VMs may not
+    # have :correlation_id etc. in the atom table until MessageIdentity loads).
+    Code.ensure_loaded!(MessageIdentity)
+    MessageIdentity.new!(data)
   end
 
   defp atomize_keys(map) when is_map(map) do
     Map.new(map, fn
-      {key, value} when is_binary(key) -> {String.to_existing_atom(key), atomize_keys(value)}
+      {key, value} when is_binary(key) -> {atomize_key(key), atomize_keys(value)}
       {key, value} when is_atom(key) -> {key, atomize_keys(value)}
     end)
   end
 
   defp atomize_keys(list) when is_list(list), do: Enum.map(list, &atomize_keys/1)
   defp atomize_keys(value), do: value
+
+  defp atomize_key(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> key
+  end
 end

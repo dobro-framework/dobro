@@ -32,4 +32,12 @@ defmodule Dobro.ContractExtendsTest do
     assert {:error, _} = Sample.Update.new(%{name: "a", note: "n"})
     assert :note in Sample.Update.__fields__()
   end
+
+  test "load/1 hydrates without requiring validated input" do
+    # Defaults are not applied on load — only present keys are hydrated.
+    assert {:ok, %Sample.Create{name: "a", count: nil}} =
+             Sample.Create.load(%{"name" => "a"})
+
+    assert {:ok, nil} = Sample.Create.load(nil)
+  end
 end

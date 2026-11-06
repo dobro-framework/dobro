@@ -49,21 +49,21 @@ defmodule Dobro.Graphql.HelpersTest do
       assert message.field == "name"
     end
 
-    test "preserves nil descriptions on validation messages" do
+    test "humanizes nil descriptions from the reason code" do
       error = %Error{path: :name, reason: :required}
 
       assert {:error, [%ValidationMessage{} = message]} = Mutation.payload({:error, [error]})
-      assert message.message == nil
+      assert message.message == "required"
       assert message.code == :required
       assert message.field == :name
     end
 
-    test "does not echo reason atoms as the validation message" do
+    test "ignores non-binary descriptions and humanizes the reason" do
       error = Error.new(:must_have_contact, description: :must_have_contact)
 
       assert {:error, [%ValidationMessage{} = message]} = Mutation.payload({:error, error})
       assert message.code == :must_have_contact
-      assert message.message == nil
+      assert message.message == "must have contact"
     end
   end
 end

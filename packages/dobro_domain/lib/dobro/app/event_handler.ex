@@ -19,10 +19,20 @@ defmodule Dobro.App.EventHandler do
     end
   end
 
-  defmacro __before_compile__(_) do
+  defmacro __before_compile__(env) do
+    ack =
+      if Module.defines?(env.module, {:__ack__, 0}) do
+        quote do: nil
+      else
+        quote do
+          def __ack__, do: :with_work
+        end
+      end
+
     quote do
       def handle(_), do: :ok
       def __stream_name__, do: @stream_name
+      unquote(ack)
 
       def __consumer_mode__ do
         @consumer_mode || Application.get_env(:dobro_runtime, :event_consumer_mode, :singleton)

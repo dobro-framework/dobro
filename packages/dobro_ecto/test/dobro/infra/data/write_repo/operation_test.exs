@@ -55,6 +55,15 @@ defmodule Dobro.Infra.Data.WriteRepo.OperationTest do
 
       assert :delete = Operation.resolve(unit_of_work, [event])
     end
+
+    test "returns :delete for a Deleted event even when schema is already gone" do
+      unit_of_work =
+        UnitOfWork.new(%{aggregate: %IdentifiedRecord{id: 1, version: 2}, schema: nil})
+
+      event = %RecordDeleted{payload: %{id: 1}}
+
+      assert :delete = Operation.resolve(unit_of_work, [event])
+    end
   end
 
   describe "delete_event?/1" do

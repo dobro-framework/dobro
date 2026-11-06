@@ -54,6 +54,7 @@ defmodule Dobro.App.Api.Middleware.Auth do
     Execution context: #{inspect(context)}
     """)
 
-    {:error, :not_authorized}
+    {:error,
+     Dobro.Error.new(:not_authorized, description: "You are not authorized to perform this action")}
   end
 end

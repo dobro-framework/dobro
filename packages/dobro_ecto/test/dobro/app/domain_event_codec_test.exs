@@ -5,7 +5,7 @@ defmodule Dobro.App.DomainEventCodecTest do
   alias Dobro.Domain.Messages.MessageIdentity
   alias Dobro.TestSupport.SampleContact
   alias Dobro.TestSupport.SampleEvent
-  alias Dobro.TestSupport.SampleTypedEvents.ContactUpdated
+  alias Dobro.TestSupport.SampleTypedEvents.{ContactUpdated, StatusTransitioned}
 
   test "round-trips a domain event through encode/decode" do
     event = %SampleEvent{
@@ -83,5 +83,51 @@ defmodule Dobro.App.DomainEventCodecTest do
 
     assert decoded.payload == %{name: "Legacy"}
     assert decoded.message_identity.id == "msg-3"
+  end
+
+  test "decode accepts full message_identity string keys without preloaded atoms" do
+    encoded = %{
+      "event_type" => "Elixir.Dobro.TestSupport.SampleEvent",
+      "payload" => %{"name" => "Cold"},
+      "message_identity" => %{
+        "id" => "msg-cold",
+        "correlation_id" => "corr-1",
+        "causation_id" => "cause-1"
+      },
+      "version" => 1
+    }
+
+    decoded = DomainEventCodec.decode(encoded)
+
+    assert decoded.message_identity.id == "msg-cold"
+    assert decoded.message_identity.correlation_id == "corr-1"
+    assert decoded.message_identity.causation_id == "cause-1"
+  end
+
+  test "decode rehydrates nested inline Original contracts in the payload" do
+    {:ok, event} =
+      StatusTransitioned.new(%{
+        payload: %{
+          id: 15,
+          lifecycle_status: "active",
+          occurred_at: ~U[2026-11-05 10:46:01Z],
+          original: %{lifecycle_status: "open"}
+        }
+      })
+
+    encoded =
+      event
+      |> DomainEventCodec.encode()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    decoded = DomainEventCodec.decode(encoded)
+
+    assert %StatusTransitioned{} = decoded
+    assert %StatusTransitioned.Payload{} = decoded.payload
+    assert decoded.payload.lifecycle_status == "active"
+
+    assert %StatusTransitioned.Payload.Original{lifecycle_status: "open"} =
+             decoded.payload.original
   end
 end

@@ -8,6 +8,10 @@ defmodule Dobro.Infra.Data.WriteRepo.Operation do
   @doc """
   Returns `:insert`, `:update`, or `:delete`.
 
+  Delete events win even when the schema is already gone (e.g. a warm actor
+  after a hard delete), so the delete strategy can return `:already_deleted`
+  instead of accidentally inserting again.
+
   Insert when there is no persisted schema yet, or any identity field on the
   aggregate is nil.
   """
@@ -16,8 +20,8 @@ defmodule Dobro.Infra.Data.WriteRepo.Operation do
     schema = Map.get(unit_of_work, :schema)
 
     cond do
-      is_nil(schema) or identity_unset?(aggregate) -> :insert
       delete_event?(events) -> :delete
+      is_nil(schema) or identity_unset?(aggregate) -> :insert
       true -> :update
     end
   end

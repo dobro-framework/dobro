@@ -44,6 +44,13 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
+    def create_and_delete(%Create{} = input) do
+      pipeline(input)
+      |> add_event(Events.WidgetCreated)
+      |> add_event(Events.WidgetDeleted, &with_deleted_at/2)
+      |> apply_changes()
+    end
+
     def delete(%__MODULE__{} = widget, %Delete{} = input) do
       widget
       |> pipeline(input)
@@ -61,6 +68,15 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     assert {:ok, %{value: widget, events: [event]}} = Widget.create(input)
     assert widget.name == "Alpha"
     assert event.payload.source == "convention"
+  end
+
+  test "events come back, are versioned, and are applied in the order they were added" do
+    {:ok, input} = Widget.Create.new(%{name: "Alpha"})
+
+    assert {:ok, %{value: widget, events: [created, deleted]}} = Widget.create_and_delete(input)
+    assert %Events.WidgetCreated{version: 1} = created
+    assert %Events.WidgetDeleted{version: 2} = deleted
+    assert widget.version == 2
   end
 
   test "with_deleted_at/2 adds deleted_at timestamp" do

@@ -90,6 +90,11 @@ defmodule Dobro.Contract do
         def new!(value), do: Helpers.new!(__MODULE__, value)
 
         @doc """
+        Loads a persisted value into this contract without validations.
+        """
+        def load(value), do: Helpers.load(__MODULE__, value)
+
+        @doc """
         Casts the contract
         """
         def cast(%Dobro.Pipeline{} = pipeline),

@@ -12,6 +12,7 @@ defmodule Dobro.Infra.Data.Outbox do
 
   alias Dobro.App.DomainEventCodec
   alias Dobro.Infra.Data.DomainEventOutboxSchema
+  alias Dobro.Infra.Data.OutboxNotify
   alias Dobro.Infra.Repo
 
   @default_batch_size 100
@@ -33,7 +34,6 @@ defmodule Dobro.Infra.Data.Outbox do
         encoded = DomainEventCodec.encode(event)
 
         %{
-          id: Ecto.UUID.generate(),
           stream_name: stream_name,
           event_payload: encoded,
           message_identity: encoded["message_identity"],
@@ -42,8 +42,12 @@ defmodule Dobro.Infra.Data.Outbox do
       end)
 
     case Repo.insert_all(DomainEventOutboxSchema, rows) do
-      {count, _} when count == length(rows) -> :ok
-      _ -> {:error, :outbox_stage_failed}
+      {count, _} when count == length(rows) ->
+        OutboxNotify.domain(stream_name)
+        :ok
+
+      _ ->
+        {:error, :outbox_stage_failed}
     end
   end
 

@@ -31,6 +31,8 @@ defmodule Dobro.Infra.Repo do
     do: apply(repo(), :preload, [struct_or_structs, preloads, opts])
   def transaction(fun, opts \\ []), do: apply(repo(), :transaction, [fun, opts])
 
+  def in_transaction?, do: apply(repo(), :in_transaction?, [])
+
   @doc """
   Runs `fun` in a transaction via `Ecto.Repo.transact/2`.
 

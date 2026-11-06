@@ -10,9 +10,10 @@ defmodule Dobro.Infra.Data.DomainEventOutboxSchema do
 
   use TypedEctoSchema
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @schema_prefix "shared"
+  @primary_key {:id, :id, autogenerate: true}
 
-  typed_schema "domain_event_outbox", prefix: "shared" do
+  typed_schema "domain_event_outbox" do
     field :stream_name, :string
     field :event_payload, :map
     field :message_identity, :map

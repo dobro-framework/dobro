@@ -114,6 +114,8 @@ defmodule Dobro.Infra.Data.WriteRepo do
 
     def repo_opts(%Context{}), do: {:ok, []}
 
+    def scope(queryable, %Context{}), do: {:ok, queryable}
+
     def apply_to_changeset(changeset, %Context{}), do: {:ok, changeset}
   end
 
@@ -127,13 +129,20 @@ defmodule Dobro.Infra.Data.WriteRepo do
 
     def repo_opts(%Context{}), do: {:ok, []}
 
+    @doc "Restricts loads to the context tenant, so an id from another tenant is not found."
+    def scope(queryable, %Context{} = context) do
+      import Ecto.Query, only: [where: 3]
+
+      case tenant_id_from_context(context) do
+        nil -> {:error, missing_tenant()}
+        tenant_id -> {:ok, where(queryable, [row], field(row, :tenant_id) == ^tenant_id)}
+      end
+    end
+
     def apply_to_changeset(changeset, %Context{} = context) do
       case tenant_id_from_context(context) do
         nil ->
-          {:error,
-           Error.new(:missing_tenant,
-             description: "Tenant id is required for tenant_id write strategy"
-           )}
+          {:error, missing_tenant()}
 
         tenant_id ->
           changeset =
@@ -152,6 +161,10 @@ defmodule Dobro.Infra.Data.WriteRepo do
       %{changeset | errors: errors, valid?: errors == []}
     end
 
+    defp missing_tenant do
+      Error.new(:missing_tenant, description: "Tenant id is required for tenant_id write strategy")
+    end
+
     defp tenant_id_from_context(%Context{tenant: %{id: tenant_id}}), do: tenant_id
     defp tenant_id_from_context(_), do: nil
   end
@@ -162,6 +175,8 @@ defmodule Dobro.Infra.Data.WriteRepo do
     """
 
     def repo_opts(%Context{} = context), do: SchemaPrefix.repo_opts(context)
+
+    def scope(queryable, %Context{}), do: {:ok, queryable}
 
     def apply_to_changeset(changeset, %Context{}), do: {:ok, changeset}
   end

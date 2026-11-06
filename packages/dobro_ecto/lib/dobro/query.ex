@@ -17,9 +17,9 @@ defmodule Dobro.Query do
   """
   def where_eq(queryable, field, value) when is_atom(field) do
     if is_nil(value) do
-      from q in queryable, where: is_nil(field(q, ^field))
+      from(q in queryable, where: is_nil(field(q, ^field)))
     else
-      from q in queryable, where: field(q, ^field) == ^value
+      from(q in queryable, where: field(q, ^field) == ^value)
     end
   end
 
@@ -159,14 +159,16 @@ defmodule Dobro.Query do
         end
 
       tenant_key_query =
-        from t in query,
+        from(t in Ecto.Query.exclude(query, [:select, :order_by, :limit, :offset, :preload]),
           where: t.tenant_id == ^tenant_id,
           select: field(t, ^key_field)
+        )
 
-      from t in query,
+      from(t in query,
         where:
           t.tenant_id == ^tenant_id or
             (is_nil(t.tenant_id) and field(t, ^key_field) not in subquery(tenant_key_query))
+      )
     end
   end
 
