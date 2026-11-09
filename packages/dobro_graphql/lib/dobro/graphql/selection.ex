@@ -19,6 +19,28 @@ defmodule Dobro.Graphql.Selection do
     from_projected_fields(Absinthe.Resolution.project(resolution), resolution, result_module)
   end
 
+  @doc """
+  Builds a selection for mutation `returning:` queries.
+
+  Mutation fields resolve a payload (`successful` / `result` / `messages`). The
+  read-model fields live under `result`, so projection must dig into that child
+  before building the selection used by the returning get query.
+  """
+  def from_mutation_resolution(%Absinthe.Resolution{} = resolution, result_module) do
+    from_mutation_projected_fields(
+      Absinthe.Resolution.project(resolution),
+      resolution,
+      result_module
+    )
+  end
+
+  @doc false
+  def from_mutation_projected_fields(projected, resolution, result_module) do
+    projected
+    |> payload_result_selections(resolution)
+    |> then(&from_projected_fields(&1, resolution, result_module))
+  end
+
   @doc false
   def from_projected_fields(projected, resolution, result_module) do
     projected = normalize_projection(projected, resolution)
@@ -29,6 +51,23 @@ defmodule Dobro.Graphql.Selection do
 
       {list_field, item_module} ->
         from_list_item_projection(projected, list_field, item_module)
+    end
+  end
+
+  # Payload selections are `successful` / `result` / `messages`. Returning reads
+  # need the nested `result { ... }` field selections only.
+  defp payload_result_selections(projected, resolution) do
+    field =
+      projected
+      |> expand_selections(resolution)
+      |> Enum.find(fn
+        %{name: name} -> normalize_key(name) == :result
+        _ -> false
+      end)
+
+    case field do
+      %{selections: selections} -> selections
+      _ -> []
     end
   end
 

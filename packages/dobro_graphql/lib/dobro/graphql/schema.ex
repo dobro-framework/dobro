@@ -504,6 +504,15 @@ defmodule Dobro.Graphql.Schema do
           unquote(field_description_block)
           unquote(arg_object)
 
+          # Before resolve: put payload `result { ... }` selection on context so
+          # `returning:` get queries project nested field exprs / enrichments.
+          middleware(fn resolution, _config ->
+            Dobro.Graphql.Schema.apply_mutation_result_selection(
+              resolution,
+              unquote(result_module)
+            )
+          end)
+
           resolve(fn
             _parent, %{input: input}, %{context: context} ->
               unquote(api_module).unquote(command_fn)(input, context)
@@ -539,12 +548,32 @@ defmodule Dobro.Graphql.Schema do
   end
 
   def apply_selection(resolution, result_module) do
-    selection = Dobro.Graphql.Selection.from_resolution(resolution, result_module)
+    put_selection(
+      resolution,
+      Dobro.Graphql.Selection.from_resolution(resolution, result_module)
+    )
+  end
 
+  @doc """
+  Puts the mutation payload's `result` field selection onto the resolution context.
+
+  Used so `returning:` queries see the same nested projection as a direct get
+  (field exprs, preloads, enrichments) instead of loading a raw Ecto row.
+  """
+  def apply_mutation_result_selection(resolution, result_module) do
+    put_selection(
+      resolution,
+      Dobro.Graphql.Selection.from_mutation_resolution(resolution, result_module)
+    )
+  end
+
+  defp put_selection(resolution, selection) do
     context =
       case resolution.context do
         %Dobro.App.ExecutionContext{} = execution_context ->
-          Dobro.App.ExecutionContext.new(Map.put(Map.from_struct(execution_context), :selection, selection))
+          Dobro.App.ExecutionContext.new(
+            Map.put(Map.from_struct(execution_context), :selection, selection)
+          )
 
         context when is_map(context) ->
           Map.put(context, :selection, selection)

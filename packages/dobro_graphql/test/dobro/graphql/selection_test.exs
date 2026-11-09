@@ -6,7 +6,7 @@ defmodule Dobro.Graphql.SelectionTest do
   alias Absinthe.Resolution
   alias Dobro.App.Selection
   alias Dobro.Graphql.Selection, as: GraphqlSelection
-  alias Dobro.Graphql.TestFixtures.{CategoryList, CategoryListItem}
+  alias Dobro.Graphql.TestFixtures.{CategoryList, CategoryListItem, PeopleInvolved}
 
   test "extracts item field selection from list projection" do
     projected = %{
@@ -93,6 +93,88 @@ defmodule Dobro.Graphql.SelectionTest do
     selection = GraphqlSelection.from_projected_fields(projected, %Resolution{}, CategoryList)
 
     assert MapSet.equal?(selection.fields, MapSet.new([:id, :tenant_name]))
+  end
+
+  test "from_mutation_projected_fields digs into payload result selections" do
+    projected = [
+      %Field{name: "successful", selections: []},
+      %Field{name: "messages", selections: [%Field{name: "message", selections: []}]},
+      %Field{
+        name: "result",
+        selections: [
+          %Field{name: "caseId", selections: []},
+          %Field{name: "comments", selections: []},
+          %Field{
+            name: "nextOfKin",
+            selections: [
+              %Field{name: "personId", selections: []},
+              %Field{name: "relationship", selections: []}
+            ]
+          },
+          %Field{
+            name: "additionalContacts",
+            selections: [
+              %Field{name: "personId", selections: []},
+              %Field{name: "relationship", selections: []}
+            ]
+          }
+        ]
+      }
+    ]
+
+    selection =
+      GraphqlSelection.from_mutation_projected_fields(projected, %Resolution{}, PeopleInvolved)
+
+    assert MapSet.equal?(selection.fields, MapSet.new([:case_id, :comments]))
+    assert Map.has_key?(selection.associations, :next_of_kin)
+    assert Map.has_key?(selection.associations, :additional_contacts)
+
+    assert MapSet.equal?(
+             selection.associations.next_of_kin.fields,
+             MapSet.new([:person_id, :relationship])
+           )
+  end
+
+  test "from_mutation_projected_fields expands fragment spreads under result" do
+    projected = [
+      %Field{
+        name: "result",
+        selections: [%Fragment.Spread{name: "PeopleInvolvedFields"}]
+      }
+    ]
+
+    resolution = %Resolution{
+      fragments: %{
+        "PeopleInvolvedFields" => %Fragment.Named{
+          name: "PeopleInvolvedFields",
+          type_condition: %Absinthe.Blueprint.TypeReference.Name{name: "PeopleInvolved"},
+          selections: [
+            %Field{name: "caseId", selections: []},
+            %Field{
+              name: "nextOfKin",
+              selections: [%Field{name: "personId", selections: []}]
+            }
+          ]
+        }
+      }
+    }
+
+    selection =
+      GraphqlSelection.from_mutation_projected_fields(projected, resolution, PeopleInvolved)
+
+    assert MapSet.member?(selection.fields, :case_id)
+    assert Map.has_key?(selection.associations, :next_of_kin)
+  end
+
+  test "from_mutation_projected_fields without result falls back to all scalars" do
+    projected = [%Field{name: "successful", selections: []}]
+
+    selection =
+      GraphqlSelection.from_mutation_projected_fields(projected, %Resolution{}, PeopleInvolved)
+
+    assert MapSet.member?(selection.fields, :case_id)
+    assert MapSet.member?(selection.fields, :comments)
+    assert selection.associations == %{}
   end
 
   defp list_item_selection(projected, item_module) do

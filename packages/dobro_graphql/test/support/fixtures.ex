@@ -25,4 +25,31 @@ defmodule Dobro.Graphql.TestFixtures do
       field :meta, :map
     end
   end
+
+  # Mutation returning: nested contracts (PeopleInvolved / RelatedPerson shape).
+  defmodule RelatedPerson do
+    @moduledoc false
+    use Dobro.Schema
+
+    schema do
+      field :person_id, :id
+      field :relationship, :string
+    end
+  end
+
+  defmodule PeopleInvolved do
+    @moduledoc false
+    use Dobro.Schema
+
+    alias Dobro.Graphql.TestFixtures.RelatedPerson
+    alias Dobro.Schema.ListOf
+
+    schema do
+      field :id, :id
+      field :case_id, :id
+      field :comments, :string
+      field :next_of_kin, RelatedPerson
+      field :additional_contacts, %ListOf{of_type: RelatedPerson}
+    end
+  end
 end
