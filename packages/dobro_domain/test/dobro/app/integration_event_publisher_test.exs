@@ -42,4 +42,38 @@ defmodule Dobro.App.IntegrationEventPublisherTest do
 
     assert built.event_name == "renamed"
   end
+
+  test "enum atoms in the public payload are stored as strings" do
+    event = %WidgetCreated{
+      payload: %{id: 7, author_user_id: 3},
+      message_identity: %{id: "evt-3"}
+    }
+
+    built =
+      Dobro.App.IntegrationEventPublisher.build(
+        event,
+        [stream_name: "Widget", subject_id: :id],
+        [topic: "widgets", subject_type: "widget"],
+        fn _e ->
+          %{
+            status: :active,
+            next_of_kin_is: nil,
+            flagged: true,
+            skipped: false,
+            tags: [:draft, :open],
+            original: %{status: :closed, note: "kept"}
+          }
+        end
+      )
+
+    assert built.payload == %{
+             status: "active",
+             next_of_kin_is: nil,
+             flagged: true,
+             skipped: false,
+             tags: ["draft", "open"],
+             original: %{status: "closed", note: "kept"},
+             author_user_id: 3
+           }
+  end
 end

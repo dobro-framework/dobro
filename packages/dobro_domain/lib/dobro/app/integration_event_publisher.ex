@@ -12,6 +12,10 @@ defmodule Dobro.App.IntegrationEventPublisher do
   (`CaseStatusTransitioned` → `case_status_transitioned`). The routing key is
   `topic.event_name` (for example `funeral_planning.case_status_transitioned`).
 
+  After the transform, atom values in the public map are stored as strings,
+  including atoms nested in maps and lists. `true`, `false`, and `nil` stay
+  booleans and null. Map keys are left as atoms; the outbox dump stringifies them.
+
   The generated handler keeps one subscription per source stream.
   """
 
@@ -104,7 +108,13 @@ defmodule Dobro.App.IntegrationEventPublisher do
   @doc false
   def build(event, meta, defaults, transform) do
     opts = Keyword.merge(defaults, meta)
-    payload = event.payload |> transform_payload(transform) |> put_author(event.payload)
+
+    payload =
+      event.payload
+      |> transform_payload(transform)
+      |> put_author(event.payload)
+      |> encode_values()
+
     topic = Keyword.fetch!(opts, :topic)
     name = Keyword.get(opts, :name) || event_name(event)
 
@@ -142,6 +152,19 @@ defmodule Dobro.App.IntegrationEventPublisher do
   end
 
   defp put_author(payload, _), do: payload
+
+  # Enum members are bare atoms. The bus stores them as strings.
+  defp encode_values(map) when is_map(map) and not is_struct(map) do
+    Map.new(map, fn {key, value} -> {key, encode_values(value)} end)
+  end
+
+  defp encode_values(list) when is_list(list) do
+    Enum.map(list, &encode_values/1)
+  end
+
+  defp encode_values(value) when value in [nil, true, false], do: value
+  defp encode_values(value) when is_atom(value), do: Atom.to_string(value)
+  defp encode_values(value), do: value
 
   defp event_name(%{__struct__: module}), do: default_event_name(module)
 
