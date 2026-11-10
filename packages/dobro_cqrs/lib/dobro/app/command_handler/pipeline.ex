@@ -268,9 +268,13 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     SpecificationContext.new(
       contract,
       Map.get(input, :identity),
-      Map.get(config, :tenant)
+      Map.get(config, :tenant),
+      auth_context(Map.get(config, :execution_context))
     )
   end
+
+  defp auth_context(%{auth_context: auth}), do: auth
+  defp auth_context(_), do: nil
 
   def put_result_version(%Pipeline{state: %{result: result}} = pipeline) do
     if is_map(result) and Map.has_key?(result, :version) do
@@ -430,13 +434,32 @@ defmodule Dobro.App.CommandHandler.Pipeline do
       if specification.satisfied_by?(context) do
         {:cont, acc}
       else
-        {:halt, {:error, specification_error(specification)}}
+        {:halt, {:error, specification_error(specification, context)}}
       end
     end)
   end
 
-  defp specification_error(specification) do
-    Error.new(specification.reason(), description: specification.description())
+  defp specification_error(specification, context) do
+    Error.new(specification.reason(),
+      description: specification_description(specification, context),
+      path: specification_path(specification)
+    )
+  end
+
+  # `description/1` can use the command context (for example a stored reason).
+  # `description/0` stays the static fallback.
+  defp specification_description(specification, context) when is_atom(specification) do
+    if Code.ensure_loaded?(specification) and function_exported?(specification, :description, 1) do
+      specification.description(context)
+    else
+      specification.description()
+    end
+  end
+
+  defp specification_path(specification) when is_atom(specification) do
+    if Code.ensure_loaded?(specification) and function_exported?(specification, :path, 0) do
+      specification.path()
+    end
   end
 
   defp default_identity_fn(identity, identify_fn) do

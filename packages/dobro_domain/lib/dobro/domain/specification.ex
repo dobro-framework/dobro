@@ -8,6 +8,10 @@ defmodule Dobro.Domain.Specification do
 
   They are useful when an invariant requires access to information outside the scope
   of a single aggregate. Ports can be provided to read cross-aggregate state.
+
+  `path:` names the input field a failure applies to. The command pipeline copies
+  it onto the error so the API can return it on that field. Omit it for a
+  form-level error.
   """
   @callback satisfied_by?(Dobro.Domain.SpecificationContext.t()) :: boolean()
 
@@ -15,6 +19,7 @@ defmodule Dobro.Domain.Specification do
     ports = Keyword.get(opts, :ports, [])
     description = Keyword.get(opts, :description, nil)
     reason = Keyword.get(opts, :reason, :specification_failed)
+    path = Keyword.get(opts, :path)
 
     quote location: :keep do
       @behaviour Dobro.Domain.Specification
@@ -29,6 +34,9 @@ defmodule Dobro.Domain.Specification do
 
       def description, do: unquote(description)
       def reason, do: unquote(reason)
+
+      @doc "Input field this failure applies to, or nil for a form-level error."
+      def path, do: unquote(path)
     end
   end
 end
