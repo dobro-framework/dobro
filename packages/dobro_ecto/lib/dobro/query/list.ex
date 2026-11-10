@@ -162,6 +162,7 @@ defmodule Dobro.Query.List do
   end
 
   defp ecto_type(_spec, {:expr, _}), do: nil
+  defp ecto_type(_spec, {:join_expr, _, _}), do: nil
 
   defp put_filter_value(%{} = filter, value) when is_map_key(filter, :value),
     do: %{filter | value: value}

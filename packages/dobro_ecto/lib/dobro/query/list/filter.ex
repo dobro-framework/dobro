@@ -123,6 +123,10 @@ defmodule Dobro.Query.List.Filter do
     condition(Spec.resolve_expr(expr), op, value)
   end
 
+  def dynamic_condition({:join_expr, _join, expr}, op, value) do
+    condition(Spec.resolve_expr(expr), op, value)
+  end
+
   @doc """
   Casts a filter value to the Ecto field type.
 
@@ -131,6 +135,9 @@ defmodule Dobro.Query.List.Filter do
 
   Pattern operators (`ilike`, `like`, …) keep the value as a string — they
   compare against the column cast to text, so Contains works on id columns.
+
+  Equality operators dump the cast value (so `Ecto.Enum` atoms become the
+  strings Postgres stores) before they are bound as query parameters.
   """
   @spec cast_value(Ecto.Type.t() | nil, atom(), term()) ::
           {:ok, term()} | {:error, :invalid_filter_value}
@@ -158,9 +165,25 @@ defmodule Dobro.Query.List.Filter do
   def cast_value(type, _op, value), do: cast_one(type, value)
 
   defp cast_one(type, value) do
+    with {:ok, casted} <- cast_type(type, value),
+         {:ok, dumped} <- dump_type(type, casted) do
+      {:ok, dumped}
+    else
+      :error -> {:error, :invalid_filter_value}
+    end
+  end
+
+  defp cast_type(type, value) do
     case Ecto.Type.cast(type, value) do
       {:ok, casted} -> {:ok, casted}
-      :error -> {:error, :invalid_filter_value}
+      _ -> :error
+    end
+  end
+
+  defp dump_type(type, value) do
+    case Ecto.Type.dump(type, value) do
+      {:ok, dumped} -> {:ok, dumped}
+      _ -> :error
     end
   end
 

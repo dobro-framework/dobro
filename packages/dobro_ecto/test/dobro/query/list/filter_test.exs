@@ -81,5 +81,13 @@ defmodule Dobro.Query.List.FilterTest do
       assert {:error, :invalid_filter_value} = Filter.cast_value(:id, :==, "not-an-id")
       assert {:error, :invalid_filter_value} = Filter.cast_value(:integer, :in, "1,x,3")
     end
+
+    test "dumps Ecto.Enum atoms to the stored string" do
+      type = Ecto.ParameterizedType.init(Ecto.Enum, values: [:enquiry, :plan])
+
+      assert {:ok, "plan"} = Filter.cast_value(type, :==, "plan")
+      assert {:ok, ["enquiry", "plan"]} = Filter.cast_value(type, :in, "enquiry,plan")
+      assert {:error, :invalid_filter_value} = Filter.cast_value(type, :==, "nope")
+    end
   end
 end
