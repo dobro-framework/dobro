@@ -125,6 +125,7 @@ defmodule Dobro.App.Api.DataSources do
   defp bind_value("$subject.id", bindings), do: get_in_binding(bindings, ["subject", "id"])
   defp bind_value("$subject.type", bindings), do: get_in_binding(bindings, ["subject", "type"])
   defp bind_value("$tenant.id", bindings), do: get_in_binding(bindings, ["tenant", "id"])
+  defp bind_value("$task.id", bindings), do: get_in_binding(bindings, ["task", "id"])
 
   defp bind_value("$event." <> path, bindings) do
     get_in_binding(bindings, ["event" | String.split(path, ".")])
