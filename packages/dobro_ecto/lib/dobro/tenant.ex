@@ -12,17 +12,20 @@ defmodule Dobro.Tenant do
   - both present → no lookup
   """
 
-  alias Dobro.App.Auth.TenantContext
+  alias Dobro.App.Auth.{GlobalContext, TenantContext}
   alias Dobro.Error
 
   @doc """
   Ensures a tenant context has both `:id` and `:identifier` when a resolver is configured.
 
-  `nil` (global scope) is returned unchanged. Complete contexts are returned as-is.
+  `%GlobalContext{}` is returned unchanged. Complete contexts are returned as-is.
+  `nil` is not a catalog context.
   Incomplete contexts are enriched via the configured `Dobro.Tenant.Resolver`.
   """
-  @spec normalize(TenantContext.t() | nil) :: {:ok, TenantContext.t() | nil} | {:error, term()}
+  @spec normalize(TenantContext.t() | GlobalContext.t() | nil) ::
+          {:ok, TenantContext.t() | GlobalContext.t() | nil} | {:error, term()}
   def normalize(nil), do: {:ok, nil}
+  def normalize(%GlobalContext{} = tenant), do: {:ok, tenant}
 
   def normalize(%TenantContext{id: id, identifier: identifier} = tenant)
       when not is_nil(id) and is_binary(identifier) and identifier != "" do
@@ -59,7 +62,10 @@ defmodule Dobro.Tenant do
 
   Always keys by tenant `:id`. Returns `{:ok, key}` or `{:error, reason}`.
   """
-  @spec partition_key(TenantContext.t() | nil) :: {:ok, String.t()} | {:error, term()}
+  @spec partition_key(TenantContext.t() | GlobalContext.t() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  def partition_key(%GlobalContext{}), do: {:ok, "global"}
+
   def partition_key(tenant) do
     with {:ok, normalized} <- normalize(tenant) do
       {:ok, TenantContext.partition_key(normalized)}
@@ -67,11 +73,14 @@ defmodule Dobro.Tenant do
   end
 
   @doc "Like `partition_key/1`, but raises on normalization failure."
-  @spec partition_key!(TenantContext.t() | nil) :: String.t()
+  @spec partition_key!(TenantContext.t() | GlobalContext.t() | nil) :: String.t()
+  def partition_key!(%GlobalContext{}), do: "global"
+
   def partition_key!(tenant) do
-    tenant
-    |> normalize!()
-    |> TenantContext.partition_key()
+    case normalize!(tenant) do
+      %GlobalContext{} -> "global"
+      normalized -> TenantContext.partition_key(normalized)
+    end
   end
 
   defp ensure_id({:ok, %TenantContext{id: id} = tenant}) when not is_nil(id), do: {:ok, tenant}

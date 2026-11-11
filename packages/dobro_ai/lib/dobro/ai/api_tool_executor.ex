@@ -423,50 +423,8 @@ defmodule Dobro.AI.ApiToolExecutor do
 
   @doc false
   @spec execution_context_for_route(route_ref(), ExecutionContext.t()) :: ExecutionContext.t()
-  def execution_context_for_route({api_module, route_name}, %ExecutionContext{} = execution_context) do
-    if global_scope_route?(api_module, route_name) do
-      strip_tenant(execution_context)
-    else
-      execution_context
-    end
-  end
-
-  defp global_scope_route?(api_module, route_name) do
-    case route_definition_module(api_module, route_name) do
-      nil ->
-        false
-
-      mod ->
-        Code.ensure_loaded(mod)
-
-        function_exported?(mod, :__scope__, 0) and match?({:global, nil}, mod.__scope__())
-    end
-  end
-
-  defp route_definition_module(api_module, route_name) do
-    Code.ensure_loaded(api_module)
-
-    query_mod =
-      if function_exported?(api_module, :__queries__, 1) do
-        case api_module.__queries__(route_name) do
-          {mod, _} when is_atom(mod) -> mod
-          _ -> nil
-        end
-      end
-
-    command_mod =
-      if is_nil(query_mod) and function_exported?(api_module, :__commands__, 1) do
-        case api_module.__commands__(route_name) do
-          {mod, _} when is_atom(mod) -> mod
-          _ -> nil
-        end
-      end
-
-    query_mod || command_mod
-  end
-
-  defp strip_tenant(%ExecutionContext{} = execution_context) do
-    %ExecutionContext{execution_context | tenant: nil}
+  def execution_context_for_route({_api_module, _route_name}, %ExecutionContext{} = execution_context) do
+    execution_context
   end
 
   # Encode tool results for Jason. Calendar/decimal types must NOT be Map.from_struct'd

@@ -36,17 +36,10 @@ defmodule Dobro.App.Definition do
   end
 
   defmacro __add_scope_fn__(env) do
-    module = env.module
-    scope = Module.get_attribute(module, :scope)
-
-    if is_nil(scope) do
-      raise "Scope is required for command: #{module}"
-    end
-
-    Dobro.App.Scope.validate_payload_scope!(module, scope, env)
+    scope = Module.get_attribute(env.module, :scope)
 
     quote do
-      def __scope__, do: @scope
+      def __scope__, do: unquote(scope)
     end
   end
 
@@ -58,12 +51,9 @@ defmodule Dobro.App.Definition do
   def scope_value(scope_name, from),
     do: raise("Invalid scope: #{inspect(scope_name)} with from: #{inspect(from)}")
 
-  defmacro scope(scope_name, opts \\ []) do
-    from = Keyword.get(opts, :from)
-    value = scope_value(scope_name, from)
-
+  defmacro scope(_scope_name, _opts \\ []) do
     quote do
-      Module.put_attribute(__MODULE__, :scope, unquote(value))
+      :ok
     end
   end
 

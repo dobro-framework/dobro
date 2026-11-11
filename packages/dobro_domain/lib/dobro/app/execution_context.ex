@@ -5,12 +5,12 @@ defmodule Dobro.App.ExecutionContext do
 
   use TypedStruct
 
-  alias Dobro.App.Auth.{AuthContext, TenantContext}
+  alias Dobro.App.Auth.{AuthContext, GlobalContext, TenantContext}
   alias Dobro.App.Selection
 
   typedstruct do
     field :auth_context, AuthContext.t(), default: nil
-    field :tenant, TenantContext.t(), default: nil
+    field :tenant, TenantContext.t() | GlobalContext.t(), default: nil
     field :selection, Selection.t(), default: nil
   end
 

@@ -5,17 +5,20 @@ defmodule Dobro.Query.TenantTest do
   alias Dobro.Query.Tenant
 
   describe "maybe_apply_tenant/3" do
-    test "with nil tenant_id and include_global: true does not filter" do
-      query = TemplateSchema |> Tenant.maybe_apply_tenant(nil, include_global: true)
+    test "nil tenant raises" do
+      assert_raise Tenant.MissingTenantError, fn ->
+        Tenant.maybe_apply_tenant(TemplateSchema, nil, include_global: true)
+      end
+    end
+
+    test "GlobalContext applies no filter" do
+      query =
+        Tenant.maybe_apply_tenant(TemplateSchema, Dobro.App.Auth.GlobalContext.new(),
+          include_global: true
+        )
 
       refute inspect(query) =~ "is_nil"
       refute inspect(query) =~ "tenant_id"
-    end
-
-    test "with nil tenant_id and include_global: false filters to global records" do
-      query = TemplateSchema |> Tenant.maybe_apply_tenant(nil, include_global: false)
-
-      assert inspect(query) =~ "is_nil"
     end
 
     test "with a tenant_id and include_global: false filters to exact tenant match" do

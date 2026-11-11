@@ -9,7 +9,7 @@ defmodule Dobro.Runtime.AggregateActor do
 
   import Dobro.Runtime.Persistence
 
-  alias Dobro.App.Auth.TenantContext
+  alias Dobro.App.Auth.{GlobalContext, TenantContext}
   alias Dobro.Error
   alias Dobro.Runtime.ActorLock
   alias Dobro.Runtime.ActorRegistry
@@ -21,7 +21,7 @@ defmodule Dobro.Runtime.AggregateActor do
     typedstruct do
       field :aggregate_module, module()
       field :identity, map()
-      field :tenant, TenantContext.t()
+      field :tenant, TenantContext.t() | GlobalContext.t()
       field :load_fn, atom()
       field :load_mode, atom(), default: :required
       field :persistence_strategy, atom()
@@ -77,6 +77,10 @@ defmodule Dobro.Runtime.AggregateActor do
 
   `tenant` must already be normalized via `Dobro.Tenant.normalize/1` with an immutable `:id`.
   """
+  def actor_key(aggregate_module, %GlobalContext{}, identity) do
+    {:aggregate_actor, aggregate_module, "global", identity_value_for(identity)}
+  end
+
   def actor_key(aggregate_module, tenant, identity) do
     {:aggregate_actor, aggregate_module, TenantContext.partition_key(tenant),
      identity_value_for(identity)}

@@ -88,4 +88,23 @@ defmodule Dobro.App.Auth do
               "Normalize via Dobro.Tenant.normalize/1 when only :identifier is available."
     end
   end
+
+  defmodule GlobalContext do
+    @moduledoc """
+    Explicit unfiltered catalog context.
+
+    A `%GlobalContext{}` in `execution_context.tenant` means a shared-table read
+    has no tenant filter and a create stamps `tenant_id` nil. It is not the same
+    as a row whose `tenant_id` is null. Nil is not this value: a missing tenant
+    is an error.
+    """
+    use TypedStruct
+
+    typedstruct do
+    end
+
+    def new, do: %__MODULE__{}
+    def new(%__MODULE__{} = context), do: context
+    def new(_attrs), do: %__MODULE__{}
+  end
 end

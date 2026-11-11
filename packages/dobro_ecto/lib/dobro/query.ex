@@ -99,25 +99,27 @@ defmodule Dobro.Query do
     @doc """
     Conditionally applies tenant filtering to a query.
 
-    When `tenant_id` is nil:
-    - `include_global: true` (default) — no tenant filter is applied
-    - `include_global: false` — only global records (`tenant_id IS NULL`)
-
-    When `tenant_id` is set, delegates to `apply_tenant/3`.
+    `%Dobro.App.Auth.GlobalContext{}` applies no tenant filter. A
+    `%Dobro.App.Auth.TenantContext{}` or integer id delegates to `apply_tenant/3`.
+    `include_global` is only read for a tenant: `true` includes rows whose
+    `tenant_id` is null, `false` keeps that tenant's rows only. Nil raises
+    `MissingTenantError`.
     """
-    def maybe_apply_tenant(query, tenant_id, opts \\ []) do
-      include_global = Keyword.get(opts, :include_global, true)
+    def maybe_apply_tenant(query, tenant, opts \\ [])
 
-      cond do
-        is_nil(tenant_id) and include_global ->
-          query
+    def maybe_apply_tenant(query, %Dobro.App.Auth.GlobalContext{}, _opts), do: query
 
-        is_nil(tenant_id) ->
-          do_apply_tenant(query, nil)
+    def maybe_apply_tenant(query, %Dobro.App.Auth.TenantContext{id: id}, opts)
+        when not is_nil(id) do
+      apply_tenant(query, id, opts)
+    end
 
-        true ->
-          apply_tenant(query, tenant_id, opts)
-      end
+    def maybe_apply_tenant(query, tenant_id, opts) when is_integer(tenant_id) do
+      apply_tenant(query, tenant_id, opts)
+    end
+
+    def maybe_apply_tenant(_query, _tenant, _opts) do
+      raise MissingTenantError, message: "Tenant is required"
     end
 
     @doc """

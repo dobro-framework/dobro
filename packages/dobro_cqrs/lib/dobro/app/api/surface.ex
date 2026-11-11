@@ -116,6 +116,17 @@ defmodule Dobro.App.Api.Surface do
     end
   end
 
+  @doc "Every API module registered on `Dobro.App.Api.Port`, regardless of surface."
+  @spec all_modules() :: [module()]
+  def all_modules do
+    registry_mod = Dobro.Config.adapter_registry!()
+
+    registry_mod.registry()
+    |> Enum.filter(fn {port, _for_criteria, _mod} -> port == Dobro.App.Api.Port end)
+    |> Enum.map(fn {_port, _for, mod} -> mod end)
+    |> Enum.uniq()
+  end
+
   @doc false
   @spec modules_for_surface(atom()) :: [module()]
   def modules_for_surface(surface) when is_atom(surface) do

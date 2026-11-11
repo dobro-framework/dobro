@@ -3,7 +3,8 @@ defmodule Dobro.Infra.SchemaPrefix do
   Resolves Ecto schema prefixes from tenant context via a configurable resolver.
   """
 
-  alias Dobro.App.Auth.TenantContext
+  alias Dobro.App.Auth.{GlobalContext, TenantContext}
+  alias Dobro.Error
 
   @doc "Returns repo options with a schema prefix for the given tenant context."
   @spec repo_opts(map()) :: {:ok, keyword()} | {:error, term()}
@@ -11,6 +12,14 @@ defmodule Dobro.Infra.SchemaPrefix do
     with {:ok, prefix} <- schema_prefix_for(tenant_context) do
       {:ok, [prefix: prefix]}
     end
+  end
+
+  def repo_opts(%{tenant: %GlobalContext{}}) do
+    {:error, Error.new(:tenant_required, description: "Tenant context is required")}
+  end
+
+  def repo_opts(%{tenant: nil}) do
+    {:error, Error.new(:tenant_required, description: "Tenant context is required")}
   end
 
   @doc "Returns repo options with a schema prefix, raising on failure."

@@ -127,31 +127,37 @@ defmodule Dobro.Infra.Data.WriteRepo do
     need not carry storage tenancy.
     """
 
+    alias Dobro.App.Auth.{GlobalContext, TenantContext}
+
     def repo_opts(%Context{}), do: {:ok, []}
 
     @doc "Restricts loads to the context tenant, so an id from another tenant is not found."
-    def scope(queryable, %Context{} = context) do
+    def scope(queryable, %Context{tenant: %GlobalContext{}}), do: {:ok, queryable}
+
+    def scope(queryable, %Context{tenant: %TenantContext{id: tenant_id}})
+        when not is_nil(tenant_id) do
       import Ecto.Query, only: [where: 3]
 
-      case tenant_id_from_context(context) do
-        nil -> {:error, missing_tenant()}
-        tenant_id -> {:ok, where(queryable, [row], field(row, :tenant_id) == ^tenant_id)}
-      end
+      {:ok, where(queryable, [row], field(row, :tenant_id) == ^tenant_id)}
     end
 
-    def apply_to_changeset(changeset, %Context{} = context) do
-      case tenant_id_from_context(context) do
-        nil ->
-          {:error, missing_tenant()}
+    def scope(_queryable, %Context{}), do: {:error, missing_tenant()}
 
-        tenant_id ->
-          changeset =
-            changeset
-            |> Ecto.Changeset.put_change(:tenant_id, tenant_id)
-            |> clear_field_error(:tenant_id)
+    def apply_to_changeset(changeset, %Context{tenant: %GlobalContext{}}) do
+      {:ok, stamp_tenant_id(changeset, nil)}
+    end
 
-          {:ok, changeset}
-      end
+    def apply_to_changeset(changeset, %Context{tenant: %TenantContext{id: tenant_id}})
+        when not is_nil(tenant_id) do
+      {:ok, stamp_tenant_id(changeset, tenant_id)}
+    end
+
+    def apply_to_changeset(_changeset, %Context{}), do: {:error, missing_tenant()}
+
+    defp stamp_tenant_id(changeset, tenant_id) do
+      changeset
+      |> Ecto.Changeset.put_change(:tenant_id, tenant_id)
+      |> clear_field_error(:tenant_id)
     end
 
     # Domain aggregates do not carry tenant_id; schema validate_required may have
@@ -164,9 +170,6 @@ defmodule Dobro.Infra.Data.WriteRepo do
     defp missing_tenant do
       Error.new(:missing_tenant, description: "Tenant id is required for tenant_id write strategy")
     end
-
-    defp tenant_id_from_context(%Context{tenant: %{id: tenant_id}}), do: tenant_id
-    defp tenant_id_from_context(_), do: nil
   end
 
   defmodule SchemaStrategy do

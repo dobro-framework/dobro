@@ -4,6 +4,7 @@ defmodule Dobro.App.ScopePolicy do
   and declared allowed scopes.
   """
 
+  alias Dobro.App.Auth.{GlobalContext, TenantContext}
   alias Dobro.App.Scope.ScopeContext
   alias Dobro.Infra.Data.ReadRepo.{SchemaStrategy, TenantIdStrategy}
 
@@ -13,12 +14,44 @@ defmodule Dobro.App.ScopePolicy do
   end
 
   @doc """
-  Validates scope against `repo` at runtime. Raises on incompatible combinations.
-
-  `:dynamic` scope is normalised before checking repo compatibility:
-  - no tenant in context → treated as `:global`
-  - tenant present → treated as `:tenant`
+  Validates a resolved tenant against `repo`. `%GlobalContext{}` requires `:global`.
+  `%TenantContext{}` requires `:tenant`. A schema repo rejects `%GlobalContext{}`.
   """
+  def validate_context!(tenant, repo) do
+    mode =
+      case tenant do
+        %GlobalContext{} -> :global
+        %TenantContext{} -> :tenant
+        _ -> :global
+      end
+
+    allowed_scopes = repo.__allowed_scopes__()
+
+    unless mode in allowed_scopes do
+      raise Error,
+        message:
+          "#{inspect(repo)} does not allow scope mode #{inspect(mode)} " <>
+            "(allowed: #{inspect(allowed_scopes)})"
+    end
+
+    strategy = repo.strategy()
+
+    cond do
+      match?(%GlobalContext{}, tenant) and strategy == SchemaStrategy ->
+        raise Error,
+          message:
+            "#{inspect(repo)} uses schema tenant strategy and requires a tenant context"
+
+      strategy in [SchemaStrategy, TenantIdStrategy] and is_nil(tenant) ->
+        raise Error,
+          message:
+            "#{inspect(repo)} requires a resolved tenant for strategy #{inspect(strategy)}"
+
+      true ->
+        :ok
+    end
+  end
+
   def validate!(%ScopeContext{} = scope_context, repo) do
     effective_mode = effective_mode(scope_context)
     allowed_scopes = repo.__allowed_scopes__()
@@ -66,7 +99,16 @@ defmodule Dobro.App.ScopePolicy do
   end
 
   defp do_validate_wiring!(query_module, repo_module, env) do
-    query_scope = query_module.__scope__()
+    query_scope = if function_exported?(query_module, :__scope__, 0), do: query_module.__scope__()
+
+    if is_nil(query_scope) do
+      :ok
+    else
+      validate_scope_modes!(query_scope, query_module, repo_module, env)
+    end
+  end
+
+  defp validate_scope_modes!(query_scope, query_module, repo_module, env) do
     allowed_scopes = repo_module.__allowed_scopes__()
 
     case required_modes(query_scope) do

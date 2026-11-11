@@ -8,7 +8,8 @@ defmodule Dobro.App.QueryHandler.Pipeline do
   alias Dobro.App.ResultCaster
   alias Dobro.App.ExecutionContext
   alias Dobro.App.QueryHandler.State
-  alias Dobro.App.Scope
+  alias Dobro.App.Auth.GlobalContext
+  alias Dobro.App.Auth.TenantContext
   alias Dobro.App.ScopePolicy
   alias Dobro.Infra.Data.ReadRepo
   alias Dobro.Pipeline
@@ -37,20 +38,29 @@ defmodule Dobro.App.QueryHandler.Pipeline do
   @doc "Validates query scope and stores a `ScopeContext` on the pipeline config."
   def setup_scope(%Pipeline{} = pipeline) do
     execution_context = Map.get(pipeline.config, :execution_context, %ExecutionContext{})
-    scope_context = Scope.setup_for_query!(pipeline.input, execution_context)
 
-    case Tenant.normalize(scope_context.tenant) do
+    case resolve_tenant(execution_context.tenant) do
       {:ok, tenant} ->
-        scope_context = %{scope_context | tenant: tenant}
-
         pipeline
-        |> put_in([Access.key(:config), Access.key(:scope_context)], scope_context)
         |> put_in([Access.key(:config), Access.key(:tenant)], tenant)
+        |> put_in(
+          [Access.key(:config), Access.key(:execution_context)],
+          %{execution_context | tenant: tenant}
+        )
 
       {:error, reason} ->
-        raise Scope.Error, message: normalize_error_message(reason)
+        raise Dobro.App.Scope.Error, message: normalize_error_message(reason)
     end
   end
+
+  defp resolve_tenant(nil),
+    do: {:error, Dobro.Error.new(:tenant_required, description: "Tenant context is required")}
+
+  defp resolve_tenant(%GlobalContext{} = tenant), do: {:ok, tenant}
+  defp resolve_tenant(%TenantContext{} = tenant), do: Tenant.normalize(tenant)
+
+  defp resolve_tenant(_tenant),
+    do: {:error, Dobro.Error.new(:tenant_required, description: "Tenant context is required")}
 
   defp normalize_error_message(%Dobro.Error{reason: _reason, description: description})
        when is_binary(description) and description != "" do
@@ -130,7 +140,7 @@ defmodule Dobro.App.QueryHandler.Pipeline do
     if function_exported?(repo, :context_mode, 0), do: repo.context_mode(), else: :none
   end
 
-  defp scope_tenant!(%{scope_context: %{tenant: tenant}}) when not is_nil(tenant), do: tenant
+  defp scope_tenant!(%{tenant: tenant}) when not is_nil(tenant), do: tenant
 
   defp scope_tenant!(_config) do
     raise "Tenant context is required for tenant-scoped repository access"
@@ -171,15 +181,14 @@ defmodule Dobro.App.QueryHandler.Pipeline do
     )
   end
 
-  defp scope_tenant(%{scope_context: %{tenant: tenant}}), do: tenant
+  defp scope_tenant(%{tenant: tenant}), do: tenant
   defp scope_tenant(_), do: nil
 
   defp selection_context?(%ExecutionContext{selection: selection}) when not is_nil(selection), do: true
   defp selection_context?(_), do: false
 
-  defp maybe_validate_scope!(%{scope_context: scope_context}, repo)
-       when not is_nil(scope_context) do
-    ScopePolicy.validate!(scope_context, repo)
+  defp maybe_validate_scope!(%{tenant: tenant}, repo) when not is_nil(tenant) do
+    ScopePolicy.validate_context!(tenant, repo)
   end
 
   defp maybe_validate_scope!(_config, _repo), do: :ok

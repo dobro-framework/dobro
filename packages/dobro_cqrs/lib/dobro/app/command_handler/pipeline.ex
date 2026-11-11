@@ -9,7 +9,8 @@ defmodule Dobro.App.CommandHandler.Pipeline do
   alias Dobro.App.CommandHandler.State
   alias Dobro.App.ExecutionContext
   alias Dobro.App.ResultCaster
-  alias Dobro.App.Scope
+  alias Dobro.App.Auth.GlobalContext
+  alias Dobro.App.Auth.TenantContext
   alias Dobro.Domain.SpecificationContext
   alias Dobro.Error
   alias Dobro.Pipeline
@@ -93,18 +94,11 @@ defmodule Dobro.App.CommandHandler.Pipeline do
     execution_context =
       Map.get(pipeline.config, :execution_context, %ExecutionContext{})
 
-    scope_context = Scope.setup!(pipeline.input.scope, execution_context)
-
-    case Tenant.normalize(scope_context.tenant) do
+    case resolve_tenant(execution_context.tenant) do
       {:ok, tenant} ->
-        scope_context = %{scope_context | tenant: tenant}
-
         pipeline
-        |> put_in([Access.key(:config), Access.key(:scope_context)], scope_context)
         |> put_in([Access.key(:config), Access.key(:tenant)], tenant)
         |> then(fn pipeline ->
-          # Keep execution_context.tenant in sync so contract/identity fns see the
-          # normalized tenant without digging into pipeline.config.
           case Map.get(pipeline.config, :execution_context) do
             %ExecutionContext{} = ctx ->
               put_in(pipeline, [Access.key(:config), Access.key(:execution_context)], %{
@@ -124,6 +118,14 @@ defmodule Dobro.App.CommandHandler.Pipeline do
         merge_errors(pipeline, Error.new(reason))
     end
   end
+
+  defp resolve_tenant(nil), do: {:error, Error.new(:tenant_required, description: "Tenant context is required")}
+
+  defp resolve_tenant(%GlobalContext{} = tenant), do: {:ok, tenant}
+
+  defp resolve_tenant(%TenantContext{} = tenant), do: Tenant.normalize(tenant)
+
+  defp resolve_tenant(_tenant), do: {:error, Error.new(:tenant_required, description: "Tenant context is required")}
 
   def put_result(pipeline, result) do
     put_in(pipeline.state.result, result)

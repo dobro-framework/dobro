@@ -197,6 +197,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
     @moduledoc """
     Strategy for read repos that have a tenant id - requires that a tenant id is present in the context
     """
+    alias Dobro.App.Auth.{GlobalContext, TenantContext}
     alias Dobro.Query
 
     def get(
@@ -206,10 +207,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
           opts \\ []
         ) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.get(id)
     end
 
@@ -220,10 +218,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
           opts \\ []
         ) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.get_by(clauses)
     end
 
@@ -233,37 +228,25 @@ defmodule Dobro.Infra.Data.ReadRepo do
           opts \\ []
         ) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.exists?()
     end
 
     def one(queryable, schema_module, opts \\ []) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.one()
     end
 
     def all(queryable, schema_module, opts \\ []) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.all()
     end
 
     def aggregate(queryable, schema_module, aggregate, opts \\ []) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Infra.Repo.aggregate(aggregate)
     end
 
@@ -274,10 +257,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
           opts \\ []
         ) do
       queryable
-      |> Query.Tenant.apply_tenant!(
-        tenant_id_from_context(context_from_opts(opts)),
-        prepare_opts(schema_module, opts)
-      )
+      |> filter_tenant(schema_module, opts)
       |> Dobro.Query.validate_and_run(query, for: schema_module)
     end
 
@@ -292,15 +272,24 @@ defmodule Dobro.Infra.Data.ReadRepo do
       |> Keyword.take([:key, :include_global])
     end
 
-    defp context_from_opts(opts) do
-      Keyword.get(opts, :context, %Context{})
+    defp filter_tenant(queryable, schema_module, opts) do
+      context = context_from_opts(opts)
+      prepared = prepare_opts(schema_module, opts)
+
+      case context.tenant do
+        %GlobalContext{} ->
+          queryable
+
+        %TenantContext{id: id} when not is_nil(id) ->
+          Query.Tenant.apply_tenant!(queryable, id, prepared)
+
+        _ ->
+          raise Query.Tenant.MissingTenantError, message: "Tenant is required"
+      end
     end
 
-    defp tenant_id_from_context(%Context{} = context) do
-      case context.tenant do
-        %{id: tenant_id} -> tenant_id
-        nil -> nil
-      end
+    defp context_from_opts(opts) do
+      Keyword.get(opts, :context, %Context{})
     end
   end
 

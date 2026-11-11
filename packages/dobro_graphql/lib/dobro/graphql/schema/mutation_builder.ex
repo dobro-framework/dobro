@@ -28,7 +28,7 @@ defmodule Dobro.Graphql.Schema.MutationBuilder do
       payload_module: payload_module,
       identity_module: identity_module,
       result_module: result_module,
-      scope: command_module.__scope__()
+      scope: if(function_exported?(command_module, :__scope__, 0), do: command_module.__scope__())
     }
   end
 
@@ -47,6 +47,9 @@ defmodule Dobro.Graphql.Schema.MutationBuilder do
   end
 
   @doc "Returns an Absinthe field block for tenant-scoped mutations, if required."
+  def scope_block(nil), do: nil
+  def scope_block(scope) when not is_tuple(scope), do: nil
+
   def scope_block({scope_name, scope_from}) do
     if scope_name == :tenant and scope_from == :payload do
       quote do

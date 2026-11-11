@@ -128,6 +128,8 @@ defmodule Dobro.App.EventStore do
 
   defp tenant_partition(nil), do: Tenant.partition_key!(nil)
 
+  defp tenant_partition(%Dobro.App.Auth.GlobalContext{}), do: "global"
+
   defp tenant_partition(%TenantContext{} = tenant), do: Tenant.partition_key!(tenant)
 
   defp tenant_partition(tenant) when is_map(tenant) do

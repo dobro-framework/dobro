@@ -8,7 +8,8 @@ defmodule Dobro.App.Api do
 
   @default_api_middleware [
     Dobro.App.Api.Middleware.Logger,
-    Dobro.App.Api.Middleware.Auth
+    Dobro.App.Api.Middleware.Auth,
+    Dobro.App.Api.Middleware.Tenant
   ]
 
   @doc """
@@ -26,6 +27,9 @@ defmodule Dobro.App.Api do
     port = Keyword.fetch!(opts, :port)
     surfaces = Keyword.get(opts, :surfaces, [])
     api_port = Dobro.App.Api.Port
+    module = __CALLER__.module
+    Module.register_attribute(module, :api_surfaces, persist: false)
+    Module.put_attribute(module, :api_surfaces, surfaces)
 
     quote do
       use Dobro.Spec.Adapter,
@@ -227,6 +231,7 @@ defmodule Dobro.App.Api do
             type: unquote(type),
             policy: unquote(policy),
             middleware: middleware,
+            surfaces: unquote(effective_surfaces),
             args: args,
             run: fn -> unquote(run) end
           }),

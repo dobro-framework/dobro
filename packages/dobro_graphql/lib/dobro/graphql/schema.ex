@@ -13,14 +13,15 @@ defmodule Dobro.Graphql.Schema do
 
   defmacro __using__(opts \\ []) do
     auto_apis = Keyword.get(opts, :auto_apis, true)
+    surfaces = Keyword.get(opts, :surfaces, [:graphql])
     mod = __CALLER__.module
+
+    Enum.each(surfaces, &Dobro.App.Api.Surface.register/1)
+    Module.put_attribute(mod, :graphql_surfaces, surfaces)
 
     auto_api_blocks =
       if auto_apis do
-        # Run at expansion time so get_env/put_env are not injected into the caller.
-        Dobro.App.Api.Surface.register(:graphql)
-
-        for api_mod <- Dobro.App.Api.Surface.modules_for_surface(:graphql) do
+        for api_mod <- Dobro.App.Api.Surface.all_modules() do
           quote do
             api(unquote(api_mod))
           end
@@ -44,13 +45,24 @@ defmodule Dobro.Graphql.Schema do
     end
   end
 
+  @doc false
+  def filter_routes(routes, schema_surfaces) when is_list(routes) do
+    Enum.filter(routes, fn {_name, {_mod, opts}} ->
+      route_surfaces = Keyword.get(opts, :surfaces, [])
+      Enum.any?(schema_surfaces, &(&1 in route_surfaces))
+    end)
+  end
+
   defmacro api(api_module) do
     api_module = Macro.expand(api_module, __CALLER__)
     Module.put_attribute(__CALLER__.module, :api_modules, api_module)
     Code.ensure_compiled(api_module)
 
-    commands = api_module.__commands__()
-    queries = api_module.__queries__()
+    schema_surfaces =
+      Module.get_attribute(__CALLER__.module, :graphql_surfaces) || [:graphql]
+
+    commands = filter_routes(api_module.__commands__(), schema_surfaces)
+    queries = filter_routes(api_module.__queries__(), schema_surfaces)
 
     graphql_mutations =
       commands

@@ -26,6 +26,7 @@ defmodule Dobro.App.Api.Pipeline do
       field :before_run, list(), default: []
       field :after_run, list(), default: []
       field :args, any() | nil, default: nil
+      field :surfaces, list(), default: []
       field :run, any() | nil, default: nil
     end
 
