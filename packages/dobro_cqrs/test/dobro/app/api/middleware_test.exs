@@ -1,7 +1,7 @@
 defmodule Dobro.App.Api.MiddlewareTest do
   use ExUnit.Case, async: false
 
-  alias Dobro.App.Api.Middleware.{Auth, Logger}
+  alias Dobro.App.Api.Middleware.{Auth, Logger, Tenant}
   alias Dobro.App.Api.Pipeline
   alias Dobro.App.Api.Pipeline.PipelineContext
   alias Dobro.App.Auth.{AuthContext, SystemActor}
@@ -59,7 +59,9 @@ defmodule Dobro.App.Api.MiddlewareTest do
 
     test "rejects missing actor" do
       pc = pipeline_context(%{middleware: [Auth]})
-      assert {:error, :not_authorized} = Pipeline.execute(pc, exec_ctx(nil))
+
+      assert {:error, %Dobro.Error{reason: :not_authorized}} =
+               Pipeline.execute(pc, exec_ctx(nil))
     end
   end
 
@@ -71,13 +73,10 @@ defmodule Dobro.App.Api.MiddlewareTest do
   end
 
   describe "default middleware resolution" do
-    test "default_middleware falls back to Logger and Auth" do
+    test "default_middleware falls back to Logger, Auth, and Tenant" do
       Application.delete_env(:dobro_cqrs, :api_middleware)
 
-      assert Dobro.App.Api.default_middleware() == [
-               Dobro.App.Api.Middleware.Logger,
-               Dobro.App.Api.Middleware.Auth
-             ]
+      assert Dobro.App.Api.default_middleware() == [Logger, Auth, Tenant]
     end
 
     test "default_middleware reads Application config" do

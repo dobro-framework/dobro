@@ -16,7 +16,7 @@ defmodule Dobro.App.Api do
   Default route middleware.
 
   Resolved at runtime from `Application.get_env(:dobro_cqrs, :api_middleware, …)`
-  so hosts can override without touching every route. Falls back to Logger + Auth.
+  so hosts can override without touching every route. Falls back to Logger, Auth, and Tenant.
   """
   def default_middleware do
     Application.get_env(:dobro_cqrs, :api_middleware, @default_api_middleware)
