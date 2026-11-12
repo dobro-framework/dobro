@@ -60,11 +60,13 @@ defmodule Dobro.Spec.AdapterRegistry do
 
   def resolve_all(entries, port, opts \\ []) do
     surface = Keyword.get(opts, :surface)
+    for_filter = Keyword.get(opts, :for, [])
 
     entries
     |> registry()
     |> Enum.filter(fn {p, for_criteria, _} ->
-      p == port and surface_matches?(for_criteria, surface)
+      p == port and surface_matches?(for_criteria, surface) and
+        for_matches?(for_criteria, for_filter)
     end)
     |> Enum.map(fn {_, _, mod} -> mod end)
   end
@@ -73,6 +75,12 @@ defmodule Dobro.Spec.AdapterRegistry do
 
   defp surface_matches?(for_criteria, surface) do
     surface in Keyword.get(for_criteria, :surfaces, [])
+  end
+
+  defp for_matches?(_criteria, []), do: true
+
+  defp for_matches?(criteria, filter) do
+    Enum.all?(filter, fn {key, value} -> Keyword.get(criteria, key) == value end)
   end
 
   def resolve!(entries, port, opts \\ []) do

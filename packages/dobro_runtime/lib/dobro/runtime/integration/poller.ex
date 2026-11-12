@@ -3,10 +3,12 @@ defmodule Dobro.Runtime.Integration.Poller do
   Drains one integration pattern subscription.
 
   A committed insert notifies every poller whose pattern matches the routing
-  key. The timer is only a refresh for a notification that was missed. Non-matching
-  rows advance the cursor without calling `handle/1`. A match is delivered and
-  the poller stops until that delivery finishes, so later rows on the pattern
-  wait. A pattern with no cursor starts at the current end of the log.
+  key. The read is limited to that pattern's topic, so other topics are not
+  loaded. Rows in the same topic that do not match the pattern advance the
+  cursor without calling `handle/1`. A loaded batch is handled in order before
+  the next read. A full batch is followed by another read. A failed delivery
+  stops the batch, so later rows wait. A pattern with no cursor starts at the
+  current end of the log.
   """
 
   use GenServer
@@ -111,7 +113,12 @@ defmodule Dobro.Runtime.Integration.Poller do
     case subscription do
       {:ok, %{last_position: nil}} ->
         Repo.transaction(fn ->
-          IntegrationOutbox.advance(handler, "integration", pattern, IntegrationOutbox.max_position())
+          IntegrationOutbox.advance(
+            handler,
+            "integration",
+            pattern,
+            IntegrationOutbox.max_position()
+          )
         end)
 
         :idle
@@ -126,41 +133,22 @@ defmodule Dobro.Runtime.Integration.Poller do
   end
 
   defp deliver_available(handler, pattern, position) do
-    rows = IntegrationOutbox.next_after(position, @batch)
-    walk(handler, pattern, rows)
+    rows = IntegrationOutbox.next_after(position, @batch, Pattern.topic(pattern))
+
+    case walk(handler, pattern, rows) do
+      :error -> :error
+      :idle -> if length(rows) == @batch, do: :ok, else: :idle
+    end
   end
 
   defp walk(_handler, _pattern, []), do: :idle
 
   defp walk(handler, pattern, [row | rest]) do
     if Pattern.match?(pattern, row.routing_key) do
-      event = %{
-        id: row.id,
-        topic: row.topic,
-        event_name: row.event_name,
-        routing_key: row.routing_key,
-        payload: row.payload,
-        causation_id: row.causation_id,
-        partition_key: row.partition_key,
-        subject_type: row.subject_type,
-        subject_id: row.subject_id,
-        occurred_at: row.occurred_at,
-        position: row.position
-      }
-
-      result =
-        Delivery.run(handler, event,
-          transaction: &transaction/2,
-          advance: fn -> IntegrationOutbox.advance(handler, "integration", pattern, row.position) end,
-          record_failure: fn reason ->
-            IntegrationOutbox.record_failure(handler, "integration", pattern, reason)
-          end,
-          dead_letter: fn event, reason ->
-            IntegrationOutbox.dead_letter(handler, pattern, event, reason)
-          end
-        )
-
-      if result == :ok or match?({:dead_letter, _}, result), do: :ok, else: :error
+      case deliver(handler, pattern, row) do
+        :error -> :error
+        _ -> walk(handler, pattern, rest)
+      end
     else
       Repo.transaction(fn ->
         IntegrationOutbox.advance(handler, "integration", pattern, row.position)
@@ -168,6 +156,38 @@ defmodule Dobro.Runtime.Integration.Poller do
 
       walk(handler, pattern, rest)
     end
+  end
+
+  defp deliver(handler, pattern, row) do
+    event = %{
+      id: row.id,
+      topic: row.topic,
+      event_name: row.event_name,
+      routing_key: row.routing_key,
+      payload: row.payload,
+      causation_id: row.causation_id,
+      partition_key: row.partition_key,
+      subject_type: row.subject_type,
+      subject_id: row.subject_id,
+      occurred_at: row.occurred_at,
+      position: row.position
+    }
+
+    result =
+      Delivery.run(handler, event,
+        transaction: &transaction/2,
+        advance: fn ->
+          IntegrationOutbox.advance(handler, "integration", pattern, row.position)
+        end,
+        record_failure: fn reason ->
+          IntegrationOutbox.record_failure(handler, "integration", pattern, reason)
+        end,
+        dead_letter: fn event, reason ->
+          IntegrationOutbox.dead_letter(handler, pattern, event, reason)
+        end
+      )
+
+    if result == :ok or match?({:dead_letter, _}, result), do: :ok, else: :error
   end
 
   defp transaction(fun, opts) do

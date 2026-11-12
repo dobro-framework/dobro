@@ -55,4 +55,10 @@ defmodule Dobro.Spec.AdapterMultiPortTest do
     # MultiPortAdapter is not registered on Api.Port; surface filter returns empty.
     assert SurfaceRegistry.resolve_all(Dobro.App.Api.Port, surface: :graphql) == []
   end
+
+  test "resolve_all filters on for criteria" do
+    assert TestRegistry.resolve_all(OtherPort, for: [tag: :other]) == [MultiPortAdapter]
+    assert TestRegistry.resolve_all(ExamplePort, for: [tag: :other]) == []
+    assert TestRegistry.resolve_all(ExamplePort) == [SinglePortAdapter, MultiPortAdapter]
+  end
 end

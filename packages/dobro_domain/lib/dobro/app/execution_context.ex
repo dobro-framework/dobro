@@ -12,6 +12,7 @@ defmodule Dobro.App.ExecutionContext do
     field :auth_context, AuthContext.t(), default: nil
     field :tenant, TenantContext.t() | GlobalContext.t(), default: nil
     field :selection, Selection.t(), default: nil
+    field :command_rules, :enforce | :bypass, default: :enforce
   end
 
   def new(%__MODULE__{} = context), do: context

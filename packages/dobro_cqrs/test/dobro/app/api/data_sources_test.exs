@@ -65,6 +65,25 @@ defmodule Dobro.App.Api.DataSourcesTest do
              DataSources.resolve(sources, bindings, ctx(), %{}, registry())
   end
 
+  test "resolve binds command and task paths" do
+    sources = %{
+      "widget" => %{
+        route: "widgets.get_widget",
+        args: %{id: "$command.id", task_id: "$task.id"}
+      }
+    }
+
+    bindings = %{
+      "subject" => %{"id" => "ignored"},
+      "tenant" => %{"id" => 9},
+      "command" => %{"id" => 15, "identifier" => "scan_upload_green_form"},
+      "task" => %{"id" => 15}
+    }
+
+    assert {:ok, %{"widget" => %{"id" => 15}}, _} =
+             DataSources.resolve(sources, bindings, ctx(), %{}, registry())
+  end
+
   test "unknown and failing routes return errors" do
     bindings = %{"subject" => %{"id" => 1}, "tenant" => %{"id" => 9}}
 

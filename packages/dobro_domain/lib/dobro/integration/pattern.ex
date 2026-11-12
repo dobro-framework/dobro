@@ -54,6 +54,17 @@ defmodule Dobro.Integration.Pattern do
     topic <> "." <> event_name
   end
 
+  @doc """
+  The leading context segment of a pattern, used to read one topic from the outbox.
+  """
+  @spec topic(String.t()) :: String.t() | nil
+  def topic(pattern) when is_binary(pattern) do
+    case compile(pattern) do
+      {:ok, [topic | _]} -> topic
+      _ -> nil
+    end
+  end
+
   defp match_segments([], []), do: true
   defp match_segments(["#"], _), do: true
   defp match_segments(["*" | pattern], [_ | key]), do: match_segments(pattern, key)

@@ -29,8 +29,17 @@ defmodule Dobro.IntegrationTest do
   end
 
   defmodule Registry do
-    def resolve_all(Dobro.Ports.EventHandler), do: [Dobro.IntegrationTest.SamplePublisher]
-    def resolve_all(_), do: []
+    def resolve_all(port, opts \\ [])
+
+    def resolve_all(Dobro.Ports.EventHandler, opts) do
+      if Keyword.get(opts, :for, [])[:integration] do
+        [Dobro.IntegrationTest.SamplePublisher]
+      else
+        []
+      end
+    end
+
+    def resolve_all(_port, _opts), do: []
   end
 
   test "catalog and prefixes come from publisher integration events" do
@@ -38,5 +47,15 @@ defmodule Dobro.IntegrationTest do
              Dobro.Integration.catalog()
 
     assert Dobro.Integration.prefixes() == ["sample.#"]
+  end
+
+  defmodule BareHandler do
+    use Dobro.App.IntegrationEventHandler
+  end
+
+  test "a handler with no patterns subscribes to every prefix" do
+    refute function_exported?(BareHandler, :__integration_patterns__, 0)
+
+    assert Dobro.Runtime.Integration.Supervisor.patterns(BareHandler) == ["sample.#"]
   end
 end

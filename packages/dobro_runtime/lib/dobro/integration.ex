@@ -33,18 +33,18 @@ defmodule Dobro.Integration do
   """
   @spec catalog() :: [map()]
   def catalog do
-    EventHandler.all()
+    publishers()
     |> Enum.flat_map(fn handler ->
       Code.ensure_loaded(handler)
-
-      if function_exported?(handler, :__integration_events__, 0) do
-        handler.__integration_events__()
-      else
-        []
-      end
+      handler.__integration_events__()
     end)
     |> Enum.uniq_by(& &1.routing_key)
     |> Enum.sort_by(& &1.routing_key)
+  end
+
+  # Publishers are domain handlers tagged by `Dobro.App.IntegrationEventPublisher`.
+  defp publishers do
+    Dobro.Config.adapter_registry!().resolve_all(EventHandler, for: [integration: true])
   end
 
   @doc """

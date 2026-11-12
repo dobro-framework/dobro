@@ -54,14 +54,21 @@ defmodule Dobro.Infra.Data.IntegrationOutbox do
     |> Repo.one()
   end
 
-  @spec next_after(integer(), pos_integer()) :: [IntegrationEventOutboxSchema.t()]
-  def next_after(position, limit) do
+  @spec next_after(integer(), pos_integer(), String.t() | nil) :: [IntegrationEventOutboxSchema.t()]
+  def next_after(position, limit, topic \\ nil) do
     IntegrationEventOutboxSchema
     |> where([row], row.position > ^position)
+    |> topic_filter(topic)
     |> order_by([row], asc: row.position)
     |> limit(^limit)
     |> Repo.all()
   end
+
+  defp topic_filter(query, topic) when is_binary(topic) and topic != "" do
+    where(query, [row], row.topic == ^topic)
+  end
+
+  defp topic_filter(query, _topic), do: query
 
   @spec ensure_subscription(module(), String.t(), String.t(), integer() | nil) ::
           IntegrationSubscriptionSchema.t()

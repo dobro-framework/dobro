@@ -52,4 +52,10 @@ defmodule Dobro.Integration.PatternTest do
     assert Pattern.routing_key("my_bc", "case_status_transitioned") ==
              "my_bc.case_status_transitioned"
   end
+
+  test "topic is the leading segment of a pattern" do
+    assert Pattern.topic("documents.#") == "documents"
+    assert Pattern.topic("funeral_planning.case_created") == "funeral_planning"
+    assert Pattern.topic("#") == nil
+  end
 end

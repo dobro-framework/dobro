@@ -131,6 +131,10 @@ defmodule Dobro.App.Api.DataSources do
     get_in_binding(bindings, ["event" | String.split(path, ".")])
   end
 
+  defp bind_value("$command." <> path, bindings) do
+    get_in_binding(bindings, ["command" | String.split(path, ".")])
+  end
+
   defp bind_value(value, bindings) when is_map(value), do: bind_args(value, bindings)
 
   defp bind_value(value, bindings) when is_list(value) do

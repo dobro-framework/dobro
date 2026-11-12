@@ -160,7 +160,7 @@ defmodule Dobro.Graphql.Selection do
 
     case Keyword.get(schema, :items) do
       {%ListOf{of_type: item_module}, _} when is_atom(item_module) ->
-        if function_exported?(item_module, :__schema__, 0) do
+        if Code.ensure_loaded?(item_module) and function_exported?(item_module, :__schema__, 0) do
           {:items, item_module}
         else
           nil

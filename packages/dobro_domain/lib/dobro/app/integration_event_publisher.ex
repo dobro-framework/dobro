@@ -16,14 +16,16 @@ defmodule Dobro.App.IntegrationEventPublisher do
   including atoms nested in maps and lists. `true`, `false`, and `nil` stay
   booleans and null. Map keys are left as atoms; the outbox dump stringifies them.
 
-  The generated handler keeps one subscription per source stream.
+  The generated handler keeps one subscription per source stream. It is
+  registered with `integration: true`, so the catalog can find publishers
+  without asking every domain handler.
   """
 
   alias Dobro.Integration.Pattern
 
   defmacro __using__(opts \\ []) do
     quote do
-      use Dobro.Spec.Adapter, port: Dobro.Ports.EventHandler
+      use Dobro.Spec.Adapter, port: Dobro.Ports.EventHandler, for: [integration: true]
       import Dobro.App.IntegrationEventPublisher, only: [publish: 1, publish: 2]
       @before_compile Dobro.App.IntegrationEventPublisher
       Module.register_attribute(__MODULE__, :integration_clauses, accumulate: true)
@@ -125,10 +127,19 @@ defmodule Dobro.App.IntegrationEventPublisher do
       payload: payload,
       causation_id: event.message_identity.id,
       partition_key: fetch_field(event.payload, Keyword.fetch!(opts, :subject_id)),
-      subject_type: Keyword.fetch!(opts, :subject_type),
+      subject_type: subject_type(opts, event.payload),
       subject_id: fetch_field(event.payload, Keyword.fetch!(opts, :subject_id)),
       occurred_at: Map.get(event.payload, :occurred_at)
     }
+  end
+
+  # `subject_type: {:field, :subject_type}` reads the value from the domain payload.
+  # A string is a fixed subject type for the whole stream.
+  defp subject_type(opts, payload) do
+    case Keyword.fetch!(opts, :subject_type) do
+      {:field, field} -> fetch_field(payload, field)
+      value -> value
+    end
   end
 
   defp transform_payload(payload, nil) do

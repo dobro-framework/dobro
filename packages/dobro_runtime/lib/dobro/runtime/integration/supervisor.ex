@@ -23,18 +23,28 @@ defmodule Dobro.Runtime.Integration.Supervisor do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  defp pattern_children(handler) do
+  @doc """
+  Patterns this handler subscribes to.
+
+  A handler with no `__integration_patterns__/0` subscribes to every topic
+  prefix known at startup.
+  """
+  def patterns(handler) do
     Code.ensure_loaded(handler)
 
     if function_exported?(handler, :__integration_patterns__, 0) do
-      Enum.map(handler.__integration_patterns__(), fn pattern ->
-        Supervisor.child_spec(
-          {Dobro.Runtime.Integration.Poller, [handler: handler, pattern: pattern]},
-          id: {Dobro.Runtime.Integration.Poller, handler, pattern}
-        )
-      end)
+      handler.__integration_patterns__()
     else
-      []
+      Dobro.Integration.prefixes()
     end
+  end
+
+  defp pattern_children(handler) do
+    Enum.map(patterns(handler), fn pattern ->
+      Supervisor.child_spec(
+        {Dobro.Runtime.Integration.Poller, [handler: handler, pattern: pattern]},
+        id: {Dobro.Runtime.Integration.Poller, handler, pattern}
+      )
+    end)
   end
 end
