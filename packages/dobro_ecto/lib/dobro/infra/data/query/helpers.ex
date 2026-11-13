@@ -33,6 +33,10 @@ defmodule Dobro.Infra.Data.Query.Helpers do
   def resolve_prefix(nil, _context), do: nil
   def resolve_prefix(prefix, _context) when is_binary(prefix), do: prefix
 
+  def resolve_prefix(:tenant, nil) do
+    raise ArgumentError, "prefix: :tenant requires a tenant on the read context"
+  end
+
   def resolve_prefix(:tenant, context) do
     case tenant_from_context(context) do
       %TenantContext{} = tenant -> SchemaPrefix.schema_prefix_for!(tenant)

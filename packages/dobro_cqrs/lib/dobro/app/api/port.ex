@@ -11,5 +11,7 @@ defmodule Dobro.App.Api.Port do
   @callback __queries__(atom()) :: {module(), keyword()} | nil
   @callback __commands__() :: keyword()
   @callback __commands__(atom()) :: {module(), keyword()} | nil
+  @callback __subscriptions__() :: keyword()
+  @callback __subscriptions__(atom()) :: keyword() | nil
   @callback __context__() :: term()
 end

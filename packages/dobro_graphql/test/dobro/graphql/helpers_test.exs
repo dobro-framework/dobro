@@ -1,7 +1,7 @@
 defmodule Dobro.Graphql.HelpersTest do
   use ExUnit.Case, async: true
 
-  alias AbsintheErrorPayload.ValidationMessage
+  alias Dobro.Graphql.Payload.ValidationMessage
   alias Dobro.Error
   alias Dobro.Graphql.Helpers.{Errors, Mutation}
 

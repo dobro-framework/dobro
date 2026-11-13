@@ -44,6 +44,7 @@ defmodule Dobro.App.Api do
 
       Module.register_attribute(__MODULE__, :commands, accumulate: true)
       Module.register_attribute(__MODULE__, :queries, accumulate: true)
+      Module.register_attribute(__MODULE__, :subscriptions, accumulate: true)
       Module.put_attribute(__MODULE__, :context, unquote(context))
       Module.put_attribute(__MODULE__, :api_surfaces, unquote(surfaces))
 
@@ -57,6 +58,10 @@ defmodule Dobro.App.Api do
 
   def __query__(name, query_module, opts, %Macro.Env{module: module}) do
     Module.put_attribute(module, :queries, {name, {query_module, opts}})
+  end
+
+  def __subscription__(name, opts, %Macro.Env{module: module}) do
+    Module.put_attribute(module, :subscriptions, {name, opts})
   end
 
   def __context__(context, %Macro.Env{module: module}) do
@@ -123,6 +128,53 @@ defmodule Dobro.App.Api do
 
   defp result_to_map(%{} = map), do: map
   defp result_to_map(_other), do: %{}
+
+  @doc """
+  Declares a subscription on this API.
+
+  `args` and `result` are contracts, or `result` is a query module whose result
+  type is reused. `topic` is `{module, function}`. The function receives the
+  argument map and returns the topic string. Publishers call that same function.
+  GraphQL projects the declaration. This does not add a route function.
+  """
+  defmacro subscription(name, opts) do
+    env = __CALLER__
+    args_mod = Macro.expand(Keyword.fetch!(opts, :args), env)
+    result_mod = Macro.expand(Keyword.fetch!(opts, :result), env)
+    {topic_mod, topic_fun} = expand_topic!(Keyword.fetch!(opts, :topic), env)
+    route_surfaces = List.wrap(Keyword.get(opts, :surfaces, []))
+    api_surfaces = Module.get_attribute(env.module, :api_surfaces) || []
+    surfaces = Enum.uniq(api_surfaces ++ route_surfaces)
+
+    quote do
+      unquote(__MODULE__).__subscription__(
+        unquote(name),
+        [
+          args: unquote(args_mod),
+          result: unquote(result_mod),
+          topic: {unquote(topic_mod), unquote(topic_fun)},
+          surfaces: unquote(surfaces)
+        ],
+        __ENV__
+      )
+    end
+  end
+
+  defp expand_topic!({module_ast, fun}, caller) when is_atom(fun) do
+    case Macro.expand(module_ast, caller) do
+      module when is_atom(module) ->
+        {module, fun}
+
+      other ->
+        raise ArgumentError,
+              "subscription topic module must be an atom, got: #{inspect(other)}"
+    end
+  end
+
+  defp expand_topic!(other, _caller) do
+    raise ArgumentError,
+          "subscription topic must be {module, function}, got: #{inspect(other)}"
+  end
 
   defmacro route(name, opts \\ []) do
     env = __CALLER__
@@ -276,12 +328,18 @@ defmodule Dobro.App.Api do
     end
   end
 
-  defmacro __before_compile__(_env) do
+  defmacro __before_compile__(env) do
+    commands = Module.get_attribute(env.module, :commands) || []
+    queries = Module.get_attribute(env.module, :queries) || []
+    subscriptions = Module.get_attribute(env.module, :subscriptions) || []
+
     quote do
-      def __commands__, do: @commands
+      def __commands__, do: unquote(Macro.escape(commands))
       def __commands__(name), do: Keyword.get(__commands__(), name)
-      def __queries__, do: @queries
+      def __queries__, do: unquote(Macro.escape(queries))
       def __queries__(name), do: Keyword.get(__queries__(), name)
+      def __subscriptions__, do: unquote(Macro.escape(subscriptions))
+      def __subscriptions__(name), do: Keyword.get(__subscriptions__(), name)
       def __context__, do: @context
       def __api_surfaces__, do: @api_surfaces
     end

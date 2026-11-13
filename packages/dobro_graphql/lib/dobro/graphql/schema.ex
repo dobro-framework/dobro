@@ -2,8 +2,8 @@ defmodule Dobro.Graphql.Schema do
   @moduledoc """
   Macros and helpers for generating Absinthe schema definitions from Dobro APIs.
 
-  Provides `api/1` to expand commands and queries from an API module, plus
-  `api_mutation/2` and `api_query/2` for individual operations.
+  Provides `api/1` to expand commands, queries, and subscriptions from an API
+  module, plus `api_mutation/2`, `api_query/2`, and `api_subscription/2`.
   """
 
   alias Dobro.Graphql.Helpers.{Errors, Mutation}
@@ -12,22 +12,58 @@ defmodule Dobro.Graphql.Schema do
   use Absinthe.Schema.Notation
 
   defmacro __using__(opts \\ []) do
-    auto_apis = Keyword.get(opts, :auto_apis, true)
     surfaces = Keyword.get(opts, :surfaces, [:graphql])
     mod = __CALLER__.module
+    caller = __CALLER__
+
+    apis =
+      opts
+      |> Keyword.get(:apis, [])
+      |> List.wrap()
+      |> Enum.map(&Macro.expand(&1, caller))
+
+    root_types =
+      opts
+      |> Keyword.get(:types, [])
+      |> List.wrap()
+      |> Enum.map(&Macro.expand(&1, caller))
+
+    auto_apis =
+      case Keyword.fetch(opts, :auto_apis) do
+        {:ok, value} -> value
+        :error -> apis == [] and root_types == []
+      end
+
+    emit =
+      Keyword.get(opts, :emit) ||
+        cond do
+          root_types != [] and apis == [] -> :shared
+          apis != [] -> :owned
+          true -> :all
+        end
 
     Enum.each(surfaces, &Dobro.App.Api.Surface.register/1)
     Module.put_attribute(mod, :graphql_surfaces, surfaces)
+    Module.put_attribute(mod, :graphql_emit, emit)
+    Module.put_attribute(mod, :graphql_root_types, root_types)
+
+    Module.put_attribute(
+      mod,
+      :graphql_owned_contexts,
+      Enum.map(apis, &owned_context!/1)
+    )
+
+    api_modules =
+      cond do
+        auto_apis -> Dobro.App.Api.Surface.all_modules()
+        true -> apis
+      end
 
     auto_api_blocks =
-      if auto_apis do
-        for api_mod <- Dobro.App.Api.Surface.all_modules() do
-          quote do
-            api(unquote(api_mod))
-          end
+      for api_mod <- api_modules do
+        quote do
+          api(unquote(api_mod))
         end
-      else
-        []
       end
 
     Module.register_attribute(mod, :referenced_types, accumulate: true)
@@ -35,14 +71,25 @@ defmodule Dobro.Graphql.Schema do
 
     quote location: :keep do
       import Dobro.Graphql.Schema
-      import AbsintheErrorPayload.Payload
+      import Dobro.Graphql.Payload
 
       @before_compile {unquote(__MODULE__), :__before_compile__}
 
       use Absinthe.Schema.Notation
 
+      defmacro schema_stamp do
+        quote do
+          :ok
+        end
+      end
+
       unquote_splicing(auto_api_blocks)
     end
+  end
+
+  defp owned_context!(api) do
+    Code.ensure_compiled!(api)
+    module_prefix_for_context(api.__context__())
   end
 
   @doc false
@@ -61,8 +108,9 @@ defmodule Dobro.Graphql.Schema do
     schema_surfaces =
       Module.get_attribute(__CALLER__.module, :graphql_surfaces) || [:graphql]
 
-    commands = filter_routes(api_module.__commands__(), schema_surfaces)
-    queries = filter_routes(api_module.__queries__(), schema_surfaces)
+    commands = filter_routes(api_module.__commands__() || [], schema_surfaces)
+    queries = filter_routes(api_module.__queries__() || [], schema_surfaces)
+    subscriptions = filter_subscriptions(api_module.__subscriptions__() || [], schema_surfaces)
 
     graphql_mutations =
       commands
@@ -80,19 +128,39 @@ defmodule Dobro.Graphql.Schema do
         end
       end)
 
+    graphql_subscriptions =
+      subscriptions
+      |> Enum.map(fn {name, _} ->
+        quote do
+          api_subscription(unquote(api_module), unquote(name))
+        end
+      end)
+
     quote do
       unquote_splicing(graphql_mutations)
       unquote_splicing(graphql_queries)
+      unquote_splicing(graphql_subscriptions)
     end
   end
 
+  @doc false
+  def filter_subscriptions(subscriptions, schema_surfaces) when is_list(subscriptions) do
+    Enum.filter(subscriptions, fn {_name, opts} ->
+      surfaces = Keyword.get(opts, :surfaces, [])
+      Enum.any?(schema_surfaces, &(&1 in surfaces))
+    end)
+  end
+
   defmacro __before_compile__(env) do
-    api_modules = Module.get_attribute(env.module, :api_modules)
-    context_map = context_map_for(api_modules)
+    api_modules = Module.get_attribute(env.module, :api_modules) || []
+    context_map = stored_context_map(api_modules)
+    root_types = Module.get_attribute(env.module, :graphql_root_types) || []
+    seed_root_types(env.module, root_types, context_map)
 
     referenced_types =
       env.module
       |> Module.get_attribute(:referenced_types)
+      |> List.wrap()
       |> Enum.uniq()
       |> dedupe_referenced_types()
 
@@ -106,6 +174,47 @@ defmodule Dobro.Graphql.Schema do
 
       def __referenced_types__, do: @referenced_types
     end
+  end
+
+  defp stored_context_map([]), do: %{}
+  defp stored_context_map(api_modules), do: context_map_for(api_modules)
+
+  defp seed_root_types(mod, types, context_map) do
+    Enum.each(types, fn type ->
+      Code.ensure_compiled(type)
+
+      cond do
+        Dobro.Enum.enum?(type) ->
+          _ = type_from_schema(mod, type, context_map, :result)
+
+        OneOf.one_of?(type) or OneOfBy.one_of_by?(type) ->
+          _ = type_from_schema(mod, type, context_map, :result)
+          _ = type_from_schema(mod, type, context_map, :input)
+
+        schema_for(type) ->
+          _ = type_from_schema(mod, type, context_map, :result)
+          _ = type_from_schema(mod, type, context_map, :input)
+
+        true ->
+          raise ArgumentError, "#{inspect(type)} is not a GraphQL schema module"
+      end
+    end)
+  end
+
+  @doc false
+  def owner_context(module, context_map) when is_atom(module) and is_map(context_map) do
+    module_parts = Module.split(module)
+
+    context_map
+    |> Map.keys()
+    |> Enum.filter(&List.starts_with?(module_parts, Module.split(&1)))
+    |> longest_context()
+  end
+
+  defp longest_context([]), do: nil
+
+  defp longest_context(contexts) do
+    Enum.max_by(contexts, fn context -> length(Module.split(context)) end)
   end
 
   # Drop plain :result/:input registrations when a specialized :union/:enum/
@@ -268,32 +377,35 @@ defmodule Dobro.Graphql.Schema do
   end
 
   defp union_type_from_schema(mod, type, context_map, :result) do
-    remember_referenced_type(mod, {type, :union})
-
-    Enum.each(union_member_types(type), fn member ->
-      _ = module_type_from_schema(mod, member, context_map, :result)
-    end)
-
     type_namespace = namespace_for(type, context_map)
-    name_for([type_namespace, name_from_module(type)])
+    name = name_for([type_namespace, name_from_module(type)])
+
+    if emit_entry?(mod, {type, :union}) and not type_already_referenced?(mod, type, :union) do
+      remember_referenced_type(mod, {type, :union})
+
+      Enum.each(union_member_types(type), fn member ->
+        _ = module_type_from_schema(mod, member, context_map, :result)
+      end)
+    end
+
+    name
   end
 
   defp union_type_from_schema(mod, type, context_map, :input) do
     # Input-position one_ofs are encoded as GraphQL `@oneOf` input objects.
-    if type_already_referenced?(mod, type, :union_input) do
-      type_namespace = namespace_for(type, context_map)
-      name_for([type_namespace, name_from_module(type), "input"])
-    else
-      remember_referenced_type(mod, {type, :union_input})
-      variants = union_keyed_variants(type)
+    type_namespace = namespace_for(type, context_map)
+    name = name_for([type_namespace, name_from_module(type), "input"])
 
-      Enum.each(variants, fn {_name, member} ->
+    if emit_entry?(mod, {type, :union_input}) and
+         not type_already_referenced?(mod, type, :union_input) do
+      remember_referenced_type(mod, {type, :union_input})
+
+      Enum.each(union_keyed_variants(type), fn {_variant_name, member} ->
         _ = module_type_from_schema(mod, member, context_map, :input)
       end)
-
-      type_namespace = namespace_for(type, context_map)
-      name_for([type_namespace, name_from_module(type), "input"])
     end
+
+    name
   end
 
   defp union_type_from_schema(_mod, _type, _context_map, gql_type) do
@@ -343,10 +455,13 @@ defmodule Dobro.Graphql.Schema do
     mod_name = name_from_module(type)
     type_namespace = namespace_for(type, context_map)
     suffix = if gql_type == :input, do: "input", else: nil
+    name = name_for([type_namespace, mod_name, suffix])
 
     # Short-circuit recursive registrations (e.g. DependencyGroup → DependencyNode → …).
-    if type_already_referenced?(mod, type, gql_type) do
-      name_for([type_namespace, mod_name, suffix])
+    # A module that does not own this type keeps the name and does not walk it,
+    # so the owner (or the shared module) is the one that emits the object.
+    if type_already_referenced?(mod, type, gql_type) or not emit_entry?(mod, {type, gql_type}) do
+      name
     else
       remember_referenced_type(mod, {type, gql_type})
 
@@ -356,7 +471,7 @@ defmodule Dobro.Graphql.Schema do
       sub_schema = schema_for(type)
       if sub_schema, do: fields_from_schema(mod, sub_schema, context_map, gql_type)
 
-      name_for([type_namespace, mod_name, suffix])
+      name
     end
   end
 
@@ -375,10 +490,36 @@ defmodule Dobro.Graphql.Schema do
 
   defp remember_referenced_type(mod, entry) do
     try do
-      Module.put_attribute(mod, :referenced_types, entry)
+      if emit_entry?(mod, entry) do
+        Module.put_attribute(mod, :referenced_types, entry)
+      end
     rescue
       ArgumentError -> :ok
     end
+  end
+
+  defp emit_entry?(mod, entry) do
+    case Module.get_attribute(mod, :graphql_emit) || :all do
+      :all -> true
+      :owned -> owned_entry?(mod, entry)
+      :shared -> shared_entry?(mod, entry)
+    end
+  rescue
+    ArgumentError -> true
+  end
+
+  defp owned_entry?(_mod, {{:one_of_input, _, _}, _}), do: true
+
+  defp owned_entry?(mod, {type, _}) when is_atom(type) do
+    context_map = stored_context_map(Module.get_attribute(mod, :api_modules) || [])
+    owner_context(type, context_map) in (Module.get_attribute(mod, :graphql_owned_contexts) || [])
+  end
+
+  defp shared_entry?(_mod, {{:one_of_input, _, _}, _}), do: true
+
+  defp shared_entry?(mod, {type, _}) when is_atom(type) do
+    context_map = stored_context_map(Module.get_attribute(mod, :api_modules) || [])
+    owner_context(type, context_map) == nil
   end
 
   defp fields_from_schema(mod, schema, context_map, gql_type) do
@@ -396,7 +537,7 @@ defmodule Dobro.Graphql.Schema do
 
   defp field_declaration(name, type_ast, nil) do
     quote do
-      field unquote(name), unquote(type_ast)
+      field(unquote(name), unquote(type_ast))
     end
   end
 
@@ -460,6 +601,7 @@ defmodule Dobro.Graphql.Schema do
       modules
 
     {_command_module, command_opts} = api_module.__commands__(command_fn)
+
     field_description_block =
       field_description_block(effective_description(command_opts, command_module))
 
@@ -651,7 +793,7 @@ defmodule Dobro.Graphql.Schema do
         end
       else
         quote do
-          unquote_splicing(value_blocks)
+          (unquote_splicing(value_blocks))
         end
       end
 
@@ -719,7 +861,11 @@ defmodule Dobro.Graphql.Schema do
     end
   end
 
-  defp build_one_of_input_type(mod, {:one_of_input, type_name, %OneOfInput{variants: variants}}, context_map) do
+  defp build_one_of_input_type(
+         mod,
+         {:one_of_input, type_name, %OneOfInput{variants: variants}},
+         context_map
+       ) do
     build_exclusive_input_object(mod, type_name, variants, context_map)
   end
 
@@ -736,7 +882,7 @@ defmodule Dobro.Graphql.Schema do
         absinthe_type = type_from_schema(mod, variant_type, context_map, :input)
 
         quote do
-          field unquote(name), unquote(absinthe_type)
+          field(unquote(name), unquote(absinthe_type))
         end
       end)
 
@@ -790,6 +936,99 @@ defmodule Dobro.Graphql.Schema do
     module_prefix = module_prefix_for_context(context_config)
     namespace = namespace_for_context(context_config)
     [{module_prefix, namespace}] |> Map.new()
+  end
+
+  @doc """
+  Projects one subscription declared on an API into an Absinthe field.
+
+  The API holds the argument contract, the result, and the topic function.
+  """
+  defmacro api_subscription(api_module, name) do
+    caller = __CALLER__
+    mod = caller.module
+    api_module = Macro.expand(api_module, caller)
+    opts = api_module.__subscriptions__(name)
+    args_mod = Keyword.fetch!(opts, :args)
+    result_mod = Keyword.fetch!(opts, :result)
+    {topic_mod, topic_fun} = Keyword.fetch!(opts, :topic)
+
+    Code.ensure_compiled!(args_mod)
+    Code.ensure_compiled!(result_mod)
+    Code.ensure_compiled!(topic_mod)
+
+    context_map = context_map_for(api_module)
+    {arg_blocks, enum_blocks} = subscription_args(mod, args_mod, context_map)
+    result_type = subscription_result_type(mod, result_mod, context_map)
+
+    quote do
+      unquote(require_schema_module(args_mod))
+      unquote(require_schema_module(result_mod))
+      require unquote(topic_mod)
+
+      unquote_splicing(enum_blocks)
+
+      extend object(:subscription) do
+        field unquote(name), unquote(result_type) do
+          unquote_splicing(arg_blocks)
+
+          config(fn args, _resolution ->
+            {:ok, topic: unquote(topic_mod).unquote(topic_fun)(args)}
+          end)
+        end
+      end
+    end
+  end
+
+  defp subscription_args(mod, args_mod, context_map) do
+    {args, enums} =
+      Enum.reduce(schema_for!(args_mod), {[], []}, fn {name, {field_type, opts}}, {args, enums} ->
+        required = Keyword.get(opts, :required, false)
+        {type_ast, enum_ast} = subscription_arg_type(mod, field_type, context_map)
+        wrapped = field_absinthe_type(type_ast, field_type, required)
+        arg = subscription_arg(name, wrapped, opts)
+        {[arg | args], enum_ast ++ enums}
+      end)
+
+    {Enum.reverse(args), Enum.reverse(enums)}
+  end
+
+  defp subscription_arg_type(mod, field_type, context_map) do
+    cond do
+      Dobro.Enum.enum?(field_type) ->
+        {name_for([name_from_module(field_type)]), [build_enum_type(field_type, %{})]}
+
+      true ->
+        {type_from_schema(mod, field_type, context_map, :input), []}
+    end
+  end
+
+  defp subscription_arg(name, type_ast, opts) do
+    if Keyword.has_key?(opts, :default) do
+      quote do
+        arg(unquote(name), unquote(type_ast), default_value: unquote(Keyword.get(opts, :default)))
+      end
+    else
+      quote do
+        arg(unquote(name), unquote(type_ast))
+      end
+    end
+  end
+
+  defp subscription_result_type(mod, result_mod, context_map) do
+    if query_result?(result_mod) do
+      name_for([
+        namespace_for(result_mod, context_map),
+        name_from_module(result_mod),
+        "result"
+      ])
+    else
+      module_type_from_schema(mod, result_mod, context_map, :result)
+    end
+  end
+
+  defp query_result?(module) do
+    function_exported?(module, :__result__, 0) and is_atom(module.__result__()) and
+      not is_nil(module.__result__())
   end
 
   defmacro api_query(api_module, query_fn) do

@@ -69,8 +69,6 @@ if Code.ensure_loaded?(Igniter) do
             # api MyApp.Catalog.Products.ProductsApi
           end
 
-          import_types Absinthe.Type.Custom
-          import_types AbsintheErrorPayload.ValidationMessageTypes
           import_types ApiSchema
 
           query do

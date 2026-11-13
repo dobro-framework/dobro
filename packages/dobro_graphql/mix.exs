@@ -29,7 +29,6 @@ defmodule DobroGraphql.MixProject do
       dobro(:dobro_cqrs),
       dobro(:dobro_ecto),
       {:absinthe, "~> 1.7"},
-      {:absinthe_error_payload, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:igniter, "~> 0.6", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

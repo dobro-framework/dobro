@@ -28,7 +28,7 @@ defmodule Dobro.Graphql.Helpers do
     Formats resolver results so Absinthe can serialize query errors.
 
     Mutations should continue to use `Dobro.Graphql.Helpers.Mutation.payload/1`,
-    which targets absinthe_error_payload validation messages.
+    which builds `Dobro.Graphql.Payload.ValidationMessage` values.
     """
     def format({:ok, _} = result), do: result
 
@@ -136,7 +136,7 @@ defmodule Dobro.Graphql.Helpers do
     end
 
     defp to_validation_message(%Dobro.Error{reason: reason, path: path, description: description}) do
-      %AbsintheErrorPayload.ValidationMessage{
+      %Dobro.Graphql.Payload.ValidationMessage{
         field: path,
         code: reason,
         message: human_description(description, reason)
@@ -147,7 +147,7 @@ defmodule Dobro.Graphql.Helpers do
       formatted = Errors.to_absinthe_error(error)
       code = Map.get(formatted, :code)
 
-      %AbsintheErrorPayload.ValidationMessage{
+      %Dobro.Graphql.Payload.ValidationMessage{
         field: Map.get(formatted, :field),
         code: code,
         message: human_description(Map.get(formatted, :message), code)
