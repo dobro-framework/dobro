@@ -4,6 +4,7 @@ defmodule Dobro.Contract.Helpers do
   """
 
   alias Dobro.Pipeline
+  alias Dobro.Schema.Input
 
   import Dobro.Pipeline
   import Dobro.State
@@ -20,7 +21,7 @@ defmodule Dobro.Contract.Helpers do
   def load(contract_module, %{} = input) do
     Pipeline.new(
       state: %{value: %{}},
-      input: normalize_input(input),
+      input: Input.normalize(input),
       config: %{schema_module: contract_module}
     )
     |> hydrate_all()
@@ -39,41 +40,11 @@ defmodule Dobro.Contract.Helpers do
   def new(contract_module, value) do
     Pipeline.new(
       state: %{value: Map.from_struct(struct(contract_module))},
-      input: normalize_input(value),
+      input: Input.normalize(value),
       config: %{schema_module: contract_module}
     )
     |> assign_all()
     |> then(&cast(contract_module, &1))
-  end
-
-  defp normalize_input(%DateTime{} = value), do: value
-  defp normalize_input(%NaiveDateTime{} = value), do: value
-  defp normalize_input(%Date{} = value), do: value
-  defp normalize_input(%Time{} = value), do: value
-
-  # Atomize this contract's own field names. Do not walk into nested maps —
-  # `:map` fields (JSON blobs, assigns) must keep their original keys, and nested
-  # contracts atomize their own fields when `type.new/1` runs.
-  defp normalize_input(%_{} = struct) do
-    struct
-    |> Map.from_struct()
-    |> Map.delete(:__meta__)
-    |> normalize_input()
-  end
-
-  defp normalize_input(map) when is_map(map) do
-    Map.new(map, fn
-      {key, value} when is_binary(key) -> {atomize_key(key), value}
-      {key, value} -> {key, value}
-    end)
-  end
-
-  defp normalize_input(other), do: other
-
-  defp atomize_key(key) when is_binary(key) do
-    String.to_existing_atom(key)
-  rescue
-    ArgumentError -> key
   end
 
   @doc "Casts `value` into `contract_module`, raising when validation fails."

@@ -5,16 +5,22 @@ defmodule Dobro.Domain.ValueObject.Helpers do
 
   alias Dobro.Domain.ValueObject.State
   alias Dobro.Pipeline
+  alias Dobro.Schema.Input
 
   import Dobro.Pipeline
   import Dobro.State
 
-  @doc "Initialises a value-object pipeline from raw input."
+  @doc """
+  Initialises a value-object pipeline from raw input.
+
+  String keys are accepted (e.g. a value object read back from a `jsonb`
+  column) and matched to the value object's fields.
+  """
   def transition(value_object_module, input) do
     config = %{schema_module: value_object_module}
     state = %State{}
 
-    Pipeline.new(state: state, input: input, config: config)
+    Pipeline.new(state: state, input: Input.normalize(input), config: config)
   end
 
   @doc """
