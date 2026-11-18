@@ -9,16 +9,16 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
 
     defevent WidgetCreated do
       payload do
-        field :id, :id
-        field :name, :string
-        field :source, :string
+        field(:id, :id)
+        field(:name, :string)
+        field(:source, :string)
       end
     end
 
     defevent WidgetDeleted do
       payload do
-        field :id, :id
-        field :deleted_at, :datetime
+        field(:id, :id)
+        field(:deleted_at, :datetime)
       end
     end
   end
@@ -27,14 +27,14 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     use Dobro.Domain.Aggregate
 
     state do
-      field :name, :string, required: true
+      field(:name, :string, required: true)
     end
 
     defcontract Create do
-      field :name, :string, required: true
+      field(:name, :string, required: true)
     end
 
-    defcontract Delete
+    defcontract(Delete)
 
     def create(%Create{} = input) do
       pipeline(input)
@@ -58,8 +58,8 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
-    defapply Events.WidgetCreated
-    defapply Events.WidgetDeleted
+    defapply(Events.WidgetCreated)
+    defapply(Events.WidgetDeleted)
   end
 
   test "add_event/5 post-transform merges extra payload fields" do
@@ -99,8 +99,8 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
 
     defevent UuidWidgetCreated do
       payload do
-        field :uuid, :id
-        field :name, :string
+        field(:uuid, :id)
+        field(:name, :string)
       end
     end
   end
@@ -109,15 +109,15 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     use Dobro.Domain.Aggregate
 
     identity do
-      field :uuid, :id
+      field(:uuid, :id)
     end
 
     state do
-      field :name, :string, required: true
+      field(:name, :string, required: true)
     end
 
     defcontract Create do
-      field :name, :string, required: true
+      field(:name, :string, required: true)
     end
 
     def create(%Create{} = input) do
@@ -132,7 +132,7 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
-    defapply UuidEvents.UuidWidgetCreated
+    defapply(UuidEvents.UuidWidgetCreated)
   end
 
   test "identity do injects custom field and copies it into event payloads" do
@@ -152,9 +152,9 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
 
     defevent WidgetDetailsUpdated do
       payload do
-        field :id, :id
-        field :name, :string
-        field :colour, :string
+        field(:id, :id)
+        field(:name, :string)
+        field(:colour, :string)
       end
     end
   end
@@ -164,13 +164,13 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     import Dobro.State
 
     state do
-      field :name, :string, required: true
-      field :colour, :string
+      field(:name, :string, required: true)
+      field(:colour, :string)
     end
 
     defcontract Update do
-      field :name, :string
-      field :colour, :string
+      field(:name, :string)
+      field(:colour, :string)
     end
 
     def update(%__MODULE__{} = widget, %Update{} = input) do
@@ -182,7 +182,45 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
-    defapply UpdateEvents.WidgetDetailsUpdated, [:name, :colour]
+    defapply(UpdateEvents.WidgetDetailsUpdated, [:name, :colour])
+  end
+
+  defmodule AnyChangeWidget do
+    use Dobro.Domain.Aggregate
+    import Dobro.State
+
+    state do
+      field(:name, :string, required: true)
+      field(:colour, :string)
+    end
+
+    defcontract Update do
+      field(:name, :string)
+      field(:colour, :string)
+      # Not state: ignored by changed?().
+      field(:reason, :string)
+    end
+
+    def update(%__MODULE__{} = widget, %Update{} = input) do
+      widget
+      |> pipeline(input)
+      |> add_event(UpdateEvents.WidgetDetailsUpdated, if: changed?())
+      |> apply_changes()
+    end
+
+    defapply(UpdateEvents.WidgetDetailsUpdated, [:name, :colour])
+  end
+
+  test "changed?/0 emits when any field the input carries differs" do
+    widget = %AnyChangeWidget{id: 1, name: "Alpha", colour: "red", version: 1}
+
+    {:ok, same} = AnyChangeWidget.Update.new(%{name: "Alpha", colour: "red", reason: "x"})
+    assert {:ok, %{events: []}} = AnyChangeWidget.update(widget, same)
+
+    {:ok, colour} = AnyChangeWidget.Update.new(%{name: "Alpha", colour: "blue"})
+
+    assert {:ok, %{value: %{colour: "blue"}, events: [_]}} =
+             AnyChangeWidget.update(widget, colour)
   end
 
   test "changed?/1 with a field list emits when any listed field differs" do
@@ -192,6 +230,7 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     assert {:ok, %{events: []}} = UpdatableWidget.update(widget, same)
 
     {:ok, colour_only} = UpdatableWidget.Update.new(%{name: "Alpha", colour: "blue"})
+
     assert {:ok, %{value: updated, events: [event]}} =
              UpdatableWidget.update(widget, colour_only)
 
@@ -211,9 +250,9 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
 
     defevent WidgetNoted do
       payload do
-        field :id, :id
-        field :name, :string
-        field :note, :string
+        field(:id, :id)
+        field(:name, :string)
+        field(:note, :string)
       end
     end
   end
@@ -222,11 +261,11 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
     use Dobro.Domain.Aggregate
 
     state do
-      field :name, :string, required: true
+      field(:name, :string, required: true)
     end
 
     defcontract Note do
-      field :name, :string
+      field(:name, :string)
     end
 
     def note(%__MODULE__{} = widget, %Note{} = input) do
@@ -239,11 +278,9 @@ defmodule Dobro.Domain.Aggregate.HelpersTest do
       |> apply_changes()
     end
 
-    defapply WorkspaceEvents.WidgetNoted, [:name]
+    defapply(WorkspaceEvents.WidgetNoted, [:name])
 
-    defp widget_noted(
-           %{state: %{value: widget, workspace: %{note: note}}, input: input}
-         ) do
+    defp widget_noted(%{state: %{value: widget, workspace: %{note: note}}, input: input}) do
       WorkspaceEvents.WidgetNoted.new(%{
         payload: %{
           id: widget.id,

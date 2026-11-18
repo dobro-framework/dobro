@@ -171,7 +171,8 @@ defmodule Dobro.Domain.Aggregate.Helpers do
     event_module.new(%{payload: attrs})
   end
 
-  defp maybe_transform_payload(attrs, aggregate, transform_fn) when is_function(transform_fn, 2) do
+  defp maybe_transform_payload(attrs, aggregate, transform_fn)
+       when is_function(transform_fn, 2) do
     transform_fn.(aggregate, attrs)
   end
 
@@ -209,6 +210,11 @@ defmodule Dobro.Domain.Aggregate.Helpers do
     conditions |> Enum.all?(&exec_event?(pipeline, &1))
   end
 
+  # Any field the input carries changed (`changed?()`).
+  defp exec_event?(pipeline, {:changed, :input}) do
+    exec_event?(pipeline, {:changed, input_fields(pipeline.input)})
+  end
+
   # Any of the listed fields changed (OR). Use `if: [changed?(:a), changed?(:b)]`
   # when every condition must hold (AND).
   defp exec_event?(pipeline, {:changed, fields}) when is_list(fields) do
@@ -221,6 +227,9 @@ defmodule Dobro.Domain.Aggregate.Helpers do
   end
 
   defp exec_event?(_pipeline, _), do: true
+
+  defp input_fields(%{__struct__: _} = input), do: input |> Map.from_struct() |> Map.keys()
+  defp input_fields(%{} = input), do: Map.keys(input)
 
   defp apply_single_event(aggregate_module, pipeline, event) do
     case aggregate_module.apply(pipeline.state.value, event) do

@@ -16,10 +16,21 @@ defmodule Dobro.State do
 
       if: changed?(:name)
       if: changed?([:name, :email, :role_ids])
+
+  With no argument, true if any field the input carries differs from state
+  (fields the state does not have are ignored):
+
+      if: changed?()
   """
   defmacro changed?(field_or_fields) do
     quote do
       {:changed, unquote(field_or_fields)}
+    end
+  end
+
+  defmacro changed? do
+    quote do
+      {:changed, :input}
     end
   end
 
@@ -70,7 +81,10 @@ defmodule Dobro.State do
         add_error(pipeline, Error.new(:must_be_list, path: field))
 
       Keyword.get(opts, :required, false) and value == [] ->
-        add_error(pipeline, Error.new(:required, path: field, description: "#{field} is required"))
+        add_error(
+          pipeline,
+          Error.new(:required, path: field, description: "#{field} is required")
+        )
 
       true ->
         reduce_list_field(pipeline, value, field, of_type, opts)
@@ -108,7 +122,10 @@ defmodule Dobro.State do
           add_error(pipeline, Error.new(:must_be_list, path: field))
 
         Keyword.get(opts, :required, false) and value == [] ->
-          add_error(pipeline, Error.new(:required, path: field, description: "#{field} is required"))
+          add_error(
+            pipeline,
+            Error.new(:required, path: field, description: "#{field} is required")
+          )
 
         true ->
           reduce_list_validation(pipeline, value, field, of_type, opts)
@@ -294,7 +311,10 @@ defmodule Dobro.State do
         if Keyword.get(opts, :required, false) do
           add_error(
             pipeline,
-            Error.new(:required, path: field, description: "#{field} requires exactly one variant")
+            Error.new(:required,
+              path: field,
+              description: "#{field} requires exactly one variant"
+            )
           )
         else
           pipeline
