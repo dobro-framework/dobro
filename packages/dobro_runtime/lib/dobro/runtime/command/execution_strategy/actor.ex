@@ -9,6 +9,7 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
   @behaviour Dobro.App.Command.ExecutionStrategy
 
   alias Dobro.App.CommandHandler.Pipeline, as: CommandPipeline
+  alias Dobro.App.Command.Commit
   alias Dobro.App.Command.Strategy
   alias Dobro.Error
   alias Dobro.Pipeline
@@ -46,7 +47,8 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
                call_fn,
                contract,
                pipeline.input.message_identity,
-               strategies
+               strategies,
+               Commit.commit_opts(pipeline)
              ) do
           {:ok, result} ->
             put_in(pipeline.state, %{
@@ -76,8 +78,10 @@ defmodule Dobro.Runtime.Command.ExecutionStrategy.Actor do
     end)
   end
 
-  defp persistence_shorthand(%Strategy{persistence: {Dobro.App.Command.PersistenceStrategy.Stateful, _}}),
-    do: :stateful
+  defp persistence_shorthand(%Strategy{
+         persistence: {Dobro.App.Command.PersistenceStrategy.Stateful, _}
+       }),
+       do: :stateful
 
   defp persistence_shorthand(%Strategy{
          persistence: {Dobro.App.Command.PersistenceStrategy.EventSourced, _}

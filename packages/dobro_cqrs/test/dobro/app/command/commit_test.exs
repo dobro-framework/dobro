@@ -15,6 +15,20 @@ defmodule Dobro.App.Command.CommitTest do
     defstruct [:payload, :message_identity]
   end
 
+  defmodule AuthoredPayload do
+    defstruct [:id, :author_user_id, :author_name, :occurred_at]
+  end
+
+  # Records the events it was asked to persist.
+  defmodule RecordingPersist do
+    def persist(uow, events, _tenant, _mi, _opts) do
+      send(self(), {:persisted, events})
+      {:ok, uow, events}
+    end
+
+    def transactional_persist?(_uow, _events, _tenant, _opts), do: false
+  end
+
   defmodule TxPersist do
     def persist(uow, events, _tenant, _mi, _opts), do: {:ok, uow, events}
     def transactional_persist?(_uow, _events, _tenant, _opts), do: true
@@ -94,7 +108,7 @@ defmodule Dobro.App.Command.CommitTest do
     assert {:ok, ^uow, ^events} =
              Commit.run(strategies, uow, events, nil, %{}, uow.aggregate)
 
-    refute FakeRepo.in_transaction?
+    refute FakeRepo.in_transaction?()
   end
 
   test "local persist + non-transactional stage without after_persist skips Commit txn", %{
@@ -109,7 +123,7 @@ defmodule Dobro.App.Command.CommitTest do
     assert {:ok, ^uow, ^events} =
              Commit.run(strategies, uow, events, nil, %{}, uow.aggregate)
 
-    refute FakeRepo.in_transaction?
+    refute FakeRepo.in_transaction?()
   end
 
   test "remote persist runs after_persist after persist (outside DB txn)", %{
@@ -171,6 +185,39 @@ defmodule Dobro.App.Command.CommitTest do
     assert enriched_event.payload.id == 42
   end
 
+  test "commit stamps the actor onto events before they are persisted", %{uow: uow} do
+    event = %Created{
+      payload: %AuthoredPayload{id: 1},
+      message_identity: MessageIdentity.new!(%{id: "event-id"})
+    }
+
+    strategies = %Strategy{
+      persistence: {RecordingPersist, []},
+      event_delivery: {NoStage, []}
+    }
+
+    assert {:ok, _uow, [%Created{payload: payload}]} =
+             Commit.run(strategies, uow, [event], nil, %{}, uow.aggregate,
+               actor: %{type: "user", id: 5, first_name: "Ada"}
+             )
+
+    assert %AuthoredPayload{author_user_id: 5, author_name: "Ada", occurred_at: %DateTime{}} =
+             payload
+
+    assert_received {:persisted, [%Created{payload: %{author_user_id: 5}}]}
+  end
+
+  test "commit_opts reads the actor from the pipeline's execution context" do
+    actor = %{type: "user", id: 5}
+
+    pipeline = %Dobro.Pipeline{
+      config: %{execution_context: %{auth_context: %{actor: actor}}}
+    }
+
+    assert Commit.commit_opts(pipeline) == [actor: actor]
+    assert Commit.commit_opts(%Dobro.Pipeline{config: %{}}) == []
+  end
+
   test "after_persist runs in the same transaction as local persist", %{uow: uow} do
     test_pid = self()
     message_identity = MessageIdentity.new!(%{id: "command-id-2"})
@@ -198,6 +245,6 @@ defmodule Dobro.App.Command.CommitTest do
              Commit.run(strategies, uow, [event], nil, message_identity, uow.aggregate)
 
     assert_received {:after_persist, 42, true}
-    refute FakeRepo.in_transaction?
+    refute FakeRepo.in_transaction?()
   end
 end

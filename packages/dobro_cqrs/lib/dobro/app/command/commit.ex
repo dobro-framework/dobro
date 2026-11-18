@@ -23,6 +23,7 @@ defmodule Dobro.App.Command.Commit do
   DB transactions use `Dobro.Infra.Repo.transact/2` so `{:error, _}` rolls back.
   """
 
+  alias Dobro.App.Command.EventEnrichment
   alias Dobro.App.Command.Strategy
   alias Dobro.Pipeline
 
@@ -30,6 +31,9 @@ defmodule Dobro.App.Command.Commit do
 
   @doc """
   Persists command side-effects and delivers events according to the resolved strategies.
+
+  Options: `:actor` and `:occurred_at`, stamped onto events by
+  `EventEnrichment.stamp_actor/2`.
   """
   @spec run(
           Strategy.t(),
@@ -37,9 +41,19 @@ defmodule Dobro.App.Command.Commit do
           [term()],
           term(),
           term(),
-          term()
+          term(),
+          keyword()
         ) :: {:ok, term(), [term()]} | {:error, term()}
-  def run(%Strategy{} = strategies, unit_of_work, events, tenant, message_identity, aggregate) do
+  def run(
+        %Strategy{} = strategies,
+        unit_of_work,
+        events,
+        tenant,
+        message_identity,
+        aggregate,
+        opts \\ []
+      ) do
+    events = EventEnrichment.stamp_actor(events, opts)
     {persistence_mod, persistence_opts} = strategies.persistence
     {delivery_mod, delivery_opts} = strategies.event_delivery
     after_persist = strategies.after_persist
@@ -302,7 +316,15 @@ defmodule Dobro.App.Command.Commit do
       message_identity = pipeline.input.message_identity
       aggregate = unit_of_work.aggregate
 
-      case run(strategies, unit_of_work, events, tenant, message_identity, aggregate) do
+      case run(
+             strategies,
+             unit_of_work,
+             events,
+             tenant,
+             message_identity,
+             aggregate,
+             commit_opts(pipeline)
+           ) do
         {:ok, unit_of_work, events} ->
           put_in(pipeline.state, %{
             pipeline.state
@@ -315,4 +337,11 @@ defmodule Dobro.App.Command.Commit do
       end
     end)
   end
+
+  @doc "Commit options (the actor) from a command pipeline's execution context."
+  @spec commit_opts(Pipeline.t()) :: keyword()
+  def commit_opts(%Pipeline{config: %{execution_context: %{auth_context: %{actor: actor}}}}),
+    do: [actor: actor]
+
+  def commit_opts(_pipeline), do: []
 end

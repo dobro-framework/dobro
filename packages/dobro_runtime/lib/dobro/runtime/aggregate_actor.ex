@@ -19,14 +19,14 @@ defmodule Dobro.Runtime.AggregateActor do
     use TypedStruct
 
     typedstruct do
-      field :aggregate_module, module()
-      field :identity, map()
-      field :tenant, TenantContext.t() | GlobalContext.t()
-      field :load_fn, atom()
-      field :load_mode, atom(), default: :required
-      field :persistence_strategy, atom()
-      field :actor_key, term()
-      field :holds_lock, boolean(), default: false
+      field(:aggregate_module, module())
+      field(:identity, map())
+      field(:tenant, TenantContext.t() | GlobalContext.t())
+      field(:load_fn, atom())
+      field(:load_mode, atom(), default: :required)
+      field(:persistence_strategy, atom())
+      field(:actor_key, term())
+      field(:holds_lock, boolean(), default: false)
     end
   end
 
@@ -145,21 +145,26 @@ defmodule Dobro.Runtime.AggregateActor do
   end
 
   @impl GenServer
-  def handle_call({:execute, _, _, _, _}, _from, %{load_error: error} = state)
+  def handle_call({:execute, _, _, _, _, _}, _from, %{load_error: error} = state)
       when not is_nil(error) do
     {:reply, {:error, error}, state}
   end
 
   def handle_call(
-        {:execute, aggregate_fn, contract, message_identity, strategies},
+        {:execute, aggregate_fn, contract, message_identity, strategies, commit_opts},
         from,
         %{unit_of_work: nil, load_error: nil} = state
       ) do
-    {:noreply, enqueue_execute(state, from, aggregate_fn, contract, message_identity, strategies)}
+    {:noreply,
+     enqueue_execute(
+       state,
+       from,
+       {aggregate_fn, contract, message_identity, strategies, commit_opts}
+     )}
   end
 
   def handle_call(
-        {:execute, aggregate_fn, contract, message_identity, strategies},
+        {:execute, aggregate_fn, contract, message_identity, strategies, commit_opts},
         _from,
         %__MODULE__{unit_of_work: unit_of_work, config: config} = state
       )
@@ -172,14 +177,23 @@ defmodule Dobro.Runtime.AggregateActor do
         aggregate_fn,
         contract,
         message_identity,
-        strategies
+        strategies,
+        commit_opts
       )
 
     {:reply, reply, state}
   end
 
-  def execute(name, aggregate_fn, contract, message_identity, strategies) do
-    GenServer.call(name, {:execute, aggregate_fn, contract, message_identity, strategies})
+  @doc """
+  Runs `aggregate_fn` in the actor and commits the result.
+
+  `commit_opts` go to `Dobro.App.Command.Commit.run/7` (e.g. `:actor`).
+  """
+  def execute(name, aggregate_fn, contract, message_identity, strategies, commit_opts \\ []) do
+    GenServer.call(
+      name,
+      {:execute, aggregate_fn, contract, message_identity, strategies, commit_opts}
+    )
   catch
     :exit, {{:error, error}, _} ->
       {:error, error}
@@ -216,20 +230,17 @@ defmodule Dobro.Runtime.AggregateActor do
     ActorRegistry.via(actor_key(aggregate_module, tenant, identity))
   end
 
-  defp enqueue_execute(state, from, aggregate_fn, contract, message_identity, strategies) do
-    %{
-      state
-      | pending_executes: [
-          {from, aggregate_fn, contract, message_identity, strategies} | state.pending_executes
-        ]
-    }
+  defp enqueue_execute(state, from, execute) do
+    %{state | pending_executes: [{from, execute} | state.pending_executes]}
   end
 
   defp reply_pending_executes(%{pending_executes: []} = state), do: state
 
   defp reply_pending_executes(%{pending_executes: pending} = state) do
-    Enum.reduce(pending, %{state | pending_executes: []}, fn {from, aggregate_fn, contract,
-                                                              message_identity, strategies},
+    Enum.reduce(pending, %{state | pending_executes: []}, fn {from,
+                                                              {aggregate_fn, contract,
+                                                               message_identity, strategies,
+                                                               commit_opts}},
                                                              state ->
       {reply, state} =
         run_execute(
@@ -239,7 +250,8 @@ defmodule Dobro.Runtime.AggregateActor do
           aggregate_fn,
           contract,
           message_identity,
-          strategies
+          strategies,
+          commit_opts
         )
 
       GenServer.reply(from, reply)
@@ -249,8 +261,7 @@ defmodule Dobro.Runtime.AggregateActor do
 
   defp reply_pending_errors(%{pending_executes: pending} = state, error) do
     Enum.each(pending, fn
-      {from, _, _, _, _} -> GenServer.reply(from, {:error, error})
-      {from, _, _} -> GenServer.reply(from, {:error, error})
+      {from, _execute} -> GenServer.reply(from, {:error, error})
     end)
 
     %{state | pending_executes: []}
@@ -263,7 +274,8 @@ defmodule Dobro.Runtime.AggregateActor do
          aggregate_fn,
          contract,
          message_identity,
-         strategies
+         strategies,
+         commit_opts
        ) do
     alias Dobro.App.Command.Commit
     alias Dobro.App.Command.EventEnrichment
@@ -288,7 +300,8 @@ defmodule Dobro.Runtime.AggregateActor do
                result.events,
                config.tenant,
                message_identity,
-               unit_of_work.aggregate
+               unit_of_work.aggregate,
+               commit_opts
              ) do
           {:ok, unit_of_work, events} ->
             state = %{state | unit_of_work: unit_of_work} |> schedule_ttl(:active)
