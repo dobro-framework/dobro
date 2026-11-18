@@ -40,6 +40,16 @@ defmodule Dobro.App.CommandHandler.MiddlewareTest do
     end
   end
 
+  defmodule InjectConfigured do
+    use Middleware
+
+    @impl true
+    def call(pipeline, opts) do
+      attrs = Map.put(pipeline.state.contract_attrs, Keyword.fetch!(opts, :into), 7)
+      put_in(pipeline.state.contract_attrs, attrs)
+    end
+  end
+
   defmodule TagAfterContract do
     use Middleware
 
@@ -121,6 +131,27 @@ defmodule Dobro.App.CommandHandler.MiddlewareTest do
     # InjectAuthorId mutates contract_attrs, but after_contract runs too late for Module.new
     assert %CreateContract{author_id: nil} = pipeline.state.contract
     assert pipeline.state.contract_attrs.author_id == 99
+  end
+
+  test "entry opts reach call/2" do
+    pipeline =
+      Pipeline.pipeline(command(), ctx(),
+        contract: CreateContract,
+        middleware: [{InjectConfigured, into: :author_id}]
+      )
+
+    assert %CreateContract{author_id: 7} = pipeline.state.contract
+  end
+
+  test "call/2 middleware keeps phase overrides" do
+    pipeline =
+      Pipeline.pipeline(command(), ctx(),
+        contract: CreateContract,
+        middleware: [{InjectConfigured, into: :author_id, phase: :after_contract}]
+      )
+
+    assert %CreateContract{author_id: nil} = pipeline.state.contract
+    assert pipeline.state.contract_attrs.author_id == 7
   end
 
   test "middleware errors short-circuit before build_contract" do

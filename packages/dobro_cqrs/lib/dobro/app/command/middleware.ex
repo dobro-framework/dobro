@@ -5,6 +5,10 @@ defmodule Dobro.App.Command.Middleware do
   Middleware modules implement `call/1` (and optionally `phase/0`). The
   command-handler pipeline invokes matching middleware at fixed phase call
   sites (`:before_contract`, `:after_contract`, `:before_execute`, `:after_execute`).
+
+  An entry may carry options, `{Module, opts}`. Middleware that implements
+  `call/2` receives them; `call/1` middleware ignores them. `:phase` in the
+  options overrides the module's phase.
   """
 
   alias Dobro.Pipeline
@@ -13,9 +17,10 @@ defmodule Dobro.App.Command.Middleware do
   @type phase :: :before_contract | :after_contract | :before_execute | :after_execute
 
   @callback call(Pipeline.t()) :: Pipeline.t()
+  @callback call(Pipeline.t(), keyword()) :: Pipeline.t()
   @callback phase() :: phase()
 
-  @optional_callbacks phase: 0
+  @optional_callbacks phase: 0, call: 1, call: 2
 
   @default_phase :before_contract
 
@@ -43,8 +48,12 @@ defmodule Dobro.App.Command.Middleware do
     &module.call/1
   end
 
-  def to_hook({module, _opts}) when is_atom(module) do
-    &module.call/1
+  def to_hook({module, opts}) when is_atom(module) and is_list(opts) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :call, 2) do
+      &module.call(&1, opts)
+    else
+      &module.call/1
+    end
   end
 
   @doc "Filters middleware entries for `phase` and runs them via `Dobro.Pipeline.run_hooks/2`."
