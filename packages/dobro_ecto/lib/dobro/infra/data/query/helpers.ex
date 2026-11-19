@@ -21,6 +21,12 @@ defmodule Dobro.Infra.Data.Query.Helpers do
   def selection(%ExecutionContext{selection: selection}), do: selection
   def selection(_), do: nil
 
+  @doc "The owner a list asks for: `args.query.owner` (or `args.owner`), or nil."
+  def owner(%{query: %{owner: owner}}) when is_list(owner), do: owner
+  def owner(%{query: %{"owner" => owner}}) when is_list(owner), do: owner
+  def owner(%{owner: owner}) when is_list(owner), do: owner
+  def owner(_args), do: nil
+
   @doc """
   Resolves a join/preload `prefix` option to a Postgres schema name.
 
@@ -114,7 +120,8 @@ defmodule Dobro.Infra.Data.Query.Helpers do
 
   @doc "Projects `needed_fields` from the queryable."
   @spec apply_select(Ecto.Queryable.t(), map(), [atom()]) :: Ecto.Queryable.t()
-  def apply_select(%Ecto.Query{select: %{expr: _}} = queryable, _fields, _needed_fields), do: queryable
+  def apply_select(%Ecto.Query{select: %{expr: _}} = queryable, _fields, _needed_fields),
+    do: queryable
 
   def apply_select(queryable, fields, needed_fields) do
     select_map =
@@ -124,7 +131,7 @@ defmodule Dobro.Infra.Data.Query.Helpers do
         {field, select_expr(Map.fetch!(fields, field))}
       end)
 
-    from q in queryable, select: ^select_map
+    from(q in queryable, select: ^select_map)
   end
 
   @doc "Spec-aware wrapper — applies conditional preloads from a query spec."
@@ -156,7 +163,17 @@ defmodule Dobro.Infra.Data.Query.Helpers do
     prefix = resolve_prefix(Map.get(join_spec, :prefix), context)
     deleted_field = Map.get(join_spec, :and_not_deleted)
 
-    do_apply_join(query, type, left_binding, left_field, right_field, schema, join_name, prefix, deleted_field)
+    do_apply_join(
+      query,
+      type,
+      left_binding,
+      left_field,
+      right_field,
+      schema,
+      join_name,
+      prefix,
+      deleted_field
+    )
   end
 
   def apply_join(query, join_name, %{type: type} = join_spec, context)
@@ -164,7 +181,17 @@ defmodule Dobro.Infra.Data.Query.Helpers do
     apply_join(query, join_name, Map.put(join_spec, :type, :inner), context)
   end
 
-  defp do_apply_join(query, type, left_binding, {:expr, left_expr}, right_field, schema, join_name, prefix, nil) do
+  defp do_apply_join(
+         query,
+         type,
+         left_binding,
+         {:expr, left_expr},
+         right_field,
+         schema,
+         join_name,
+         prefix,
+         nil
+       ) do
     # `^dynamic` must be the entire `on:` value. Bind the join by its `as:` name so
     # the right-hand side is not confused with the parent binding.
     left = Spec.resolve_expr(left_expr)
@@ -197,7 +224,17 @@ defmodule Dobro.Infra.Data.Query.Helpers do
     apply_expr_join(query, type, left_binding, schema, join_name, prefix, on_expr)
   end
 
-  defp do_apply_join(query, type, left_binding, left_field, right_field, schema, join_name, prefix, nil)
+  defp do_apply_join(
+         query,
+         type,
+         left_binding,
+         left_field,
+         right_field,
+         schema,
+         join_name,
+         prefix,
+         nil
+       )
        when is_atom(left_field) do
     if prefix do
       join(query, type, [{^left_binding, left}], assoc in ^schema,
@@ -213,7 +250,17 @@ defmodule Dobro.Infra.Data.Query.Helpers do
     end
   end
 
-  defp do_apply_join(query, type, left_binding, left_field, right_field, schema, join_name, prefix, deleted_field)
+  defp do_apply_join(
+         query,
+         type,
+         left_binding,
+         left_field,
+         right_field,
+         schema,
+         join_name,
+         prefix,
+         deleted_field
+       )
        when is_atom(left_field) and is_atom(deleted_field) do
     if prefix do
       join(query, type, [{^left_binding, left}], assoc in ^schema,
@@ -304,6 +351,7 @@ defmodule Dobro.Infra.Data.Query.Helpers do
          context
        ) do
     prefix = resolve_prefix(Map.get(spec, :prefix), context)
+
     fields =
       case Map.get(selection.associations, name) do
         %Selection{fields: assoc_fields} when map_size(assoc_fields) > 0 ->
@@ -324,7 +372,9 @@ defmodule Dobro.Infra.Data.Query.Helpers do
   defp prefixed_from(schema, nil, nil), do: from(s in schema)
   defp prefixed_from(schema, nil, prefix), do: from(s in schema, prefix: ^prefix)
   defp prefixed_from(schema, fields, nil), do: from(s in schema, select: ^fields)
-  defp prefixed_from(schema, fields, prefix), do: from(s in schema, prefix: ^prefix, select: ^fields)
+
+  defp prefixed_from(schema, fields, prefix),
+    do: from(s in schema, prefix: ^prefix, select: ^fields)
 
   defp apply_nested_preloads(query, %{preloads: []}, _selection, _context), do: query
 
@@ -334,7 +384,11 @@ defmodule Dobro.Infra.Data.Query.Helpers do
     nested_pairs =
       Enum.map(nested, fn nested_spec ->
         {nested_spec.name,
-         preload_query(nested_spec, nested_parent_selection(parent_selection, nested_spec.name), context)}
+         preload_query(
+           nested_spec,
+           nested_parent_selection(parent_selection, nested_spec.name),
+           context
+         )}
       end)
 
     preload(query, ^nested_pairs)

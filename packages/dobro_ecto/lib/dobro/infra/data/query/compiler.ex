@@ -13,15 +13,24 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     ctx = %{repo: repo, query_name: name}
 
     case type do
-      :list -> compile_list(repo, schema, root_binding, default_limit, query_fn, block, env, ctx, opts)
-      :one -> compile_one(repo, schema, id_field, root_binding, query_fn, block, env, ctx, opts)
-      :exists -> compile_exists(repo, schema, id_field, query_fn, block, env, ctx, opts)
-      :facet -> compile_facet(repo, schema, root_binding, query_fn, block, env, ctx, opts)
+      :list ->
+        compile_list(repo, schema, root_binding, default_limit, query_fn, block, env, ctx, opts)
+
+      :one ->
+        compile_one(repo, schema, id_field, root_binding, query_fn, block, env, ctx, opts)
+
+      :exists ->
+        compile_exists(repo, schema, id_field, query_fn, block, env, ctx, opts)
+
+      :facet ->
+        compile_facet(repo, schema, root_binding, query_fn, block, env, ctx, opts)
     end
   end
 
   defp compile_list(repo, schema, root_binding, default_limit, query_fn, block, env, ctx, opts) do
-    {joins, fields, config, query_ast, expr_defs} = compile_block(block, schema, root_binding, env, ctx)
+    {joins, fields, config, query_ast, expr_defs} =
+      compile_block(block, schema, root_binding, env, ctx)
+
     fields = apply_exclude(fields, config)
 
     ensure_fields!(fields, :list)
@@ -57,14 +66,16 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       count: count,
       query: query,
       enriches: finalize_enriches(config),
-      include_global: Keyword.get(opts, :include_global)
+      owners: Keyword.get(opts, :owners)
     }
 
     {spec, query_ast, expr_defs}
   end
 
   defp compile_one(repo, schema, id_field, root_binding, query_fn, block, env, ctx, opts) do
-    {joins, fields, config, query_ast, expr_defs} = compile_block(block, schema, root_binding, env, ctx)
+    {joins, fields, config, query_ast, expr_defs} =
+      compile_block(block, schema, root_binding, env, ctx)
+
     fields = apply_exclude(fields, config)
 
     ensure_fields!(fields, :one)
@@ -87,7 +98,7 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       preloads: Keyword.get(config, :preloads, []),
       enriches: finalize_enriches(config),
       query: query,
-      include_global: Keyword.get(opts, :include_global)
+      owners: Keyword.get(opts, :owners)
     }
 
     {spec, query_ast, expr_defs}
@@ -111,14 +122,15 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       id_field: id_field,
       filterable: finalize_queryable(config, :filterable),
       query: query,
-      include_global: Keyword.get(opts, :include_global)
+      owners: Keyword.get(opts, :owners)
     }
 
     {spec, query_ast, expr_defs}
   end
 
   defp compile_facet(repo, schema, root_binding, query_fn, block, env, ctx, opts) do
-    {joins, fields, config, query_ast, expr_defs} = compile_block(block, schema, root_binding, env, ctx)
+    {joins, fields, config, query_ast, expr_defs} =
+      compile_block(block, schema, root_binding, env, ctx)
 
     facets =
       opts
@@ -158,7 +170,7 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       filterable: filterable,
       facets: facets,
       query: query,
-      include_global: Keyword.get(opts, :include_global)
+      owners: Keyword.get(opts, :owners)
     }
 
     {spec, query_ast, expr_defs}
@@ -192,7 +204,14 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     end)
   end
 
-  defp compile_expression({:join, _, args}, {joins, fields, config, query_ast, expr_defs}, schema, root_binding, env, ctx) do
+  defp compile_expression(
+         {:join, _, args},
+         {joins, fields, config, query_ast, expr_defs},
+         schema,
+         root_binding,
+         env,
+         ctx
+       ) do
     {join_name, opts, join_block} = parse_join_args!(args)
     opts = expand_join_schema_opt(opts, env)
     {opts, on_expr_defs} = compile_join_on_opt(opts, join_name, ctx)
@@ -212,18 +231,29 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     }
   end
 
-  defp compile_expression({:field, _, [name, source | field_opts]}, acc, _schema, root_binding, _env, ctx) do
+  defp compile_expression(
+         {:field, _, [name, source | field_opts]},
+         acc,
+         _schema,
+         root_binding,
+         _env,
+         ctx
+       ) do
     {joins, fields, config, query_ast, expr_defs} = acc
 
     cond do
       is_list(source) and Keyword.keyword?(source) ->
         {field_spec, new_defs} = compile_root_field(name, root_binding, source, ctx)
-        {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, source), query_ast, expr_defs ++ new_defs}
+
+        {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, source),
+         query_ast, expr_defs ++ new_defs}
 
       true ->
         opts = if is_list(field_opts), do: field_opts, else: []
         {field_spec, new_defs} = compile_root_field(source, root_binding, opts, ctx)
-        {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, opts), query_ast, expr_defs ++ new_defs}
+
+        {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, opts),
+         query_ast, expr_defs ++ new_defs}
     end
   end
 
@@ -231,7 +261,9 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     {joins, fields, config, query_ast, expr_defs} = acc
     opts = if is_list(field_opts), do: field_opts, else: []
     {field_spec, new_defs} = compile_root_field(name, root_binding, opts, ctx)
-    {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, opts), query_ast, expr_defs ++ new_defs}
+
+    {joins, Map.put(fields, name, field_spec), merge_field_config(config, name, opts), query_ast,
+     expr_defs ++ new_defs}
   end
 
   # Shorthand for root columns — each becomes a `field` with filterable/sortable default true.
@@ -275,13 +307,16 @@ defmodule Dobro.Infra.Data.Query.Compiler do
       preloads: compile_preload_block(block, env)
     }
 
-    {joins, fields, Keyword.update(config, :preloads, [preload], &[preload | &1]), query_ast, expr_defs}
+    {joins, fields, Keyword.update(config, :preloads, [preload], &[preload | &1]), query_ast,
+     expr_defs}
   end
 
   defp compile_expression({:enrich, _, args}, acc, _schema, _root_binding, env, _ctx) do
     {joins, fields, config, query_ast, expr_defs} = acc
     enrich = compile_enrich!(args, env)
-    {joins, fields, Keyword.update(config, :enriches, [enrich], &[enrich | &1]), query_ast, expr_defs}
+
+    {joins, fields, Keyword.update(config, :enriches, [enrich], &[enrich | &1]), query_ast,
+     expr_defs}
   end
 
   defp compile_expression(other, _, _, _, _, _) do
@@ -294,7 +329,8 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     into = Keyword.get(opts, :into) || raise ArgumentError, "enrich requires into:"
 
     unless is_atom(key) and is_atom(into) do
-      raise ArgumentError, "enrich key:/into: must be atoms, got key: #{inspect(key)}, into: #{inspect(into)}"
+      raise ArgumentError,
+            "enrich key:/into: must be atoms, got key: #{inspect(key)}, into: #{inspect(into)}"
     end
 
     %{
@@ -382,7 +418,8 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     {name, schema, opts, nil}
   end
 
-  defp parse_preload_args!([name, schema, opts, [do: block]]) when is_atom(name) and is_list(opts) do
+  defp parse_preload_args!([name, schema, opts, [do: block]])
+       when is_atom(name) and is_list(opts) do
     {name, schema, opts, block}
   end
 
@@ -421,7 +458,8 @@ defmodule Dobro.Infra.Data.Query.Compiler do
     {join_name, [], join_block}
   end
 
-  defp parse_join_args!([join_name, opts, [do: join_block]]) when is_atom(join_name) and is_list(opts) do
+  defp parse_join_args!([join_name, opts, [do: join_block]])
+       when is_atom(join_name) and is_list(opts) do
     {join_name, opts, join_block}
   end
 

@@ -11,7 +11,7 @@ defmodule Dobro.Infra.Data.Query.ListRunner do
     selection = Helpers.selection(context)
     params = args |> Map.get(:query) |> Params.normalize_query()
     ecto_query = build_queryable(repo_module, spec, args, context)
-    strategy_opts = StrategyOpts.build(repo_module, context, spec)
+    strategy_opts = StrategyOpts.build(repo_module, context, spec, Helpers.owner(args))
 
     List.run(
       ecto_query,

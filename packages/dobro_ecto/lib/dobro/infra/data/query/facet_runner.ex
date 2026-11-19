@@ -3,12 +3,12 @@ defmodule Dobro.Infra.Data.Query.FacetRunner do
 
   import Ecto.Query
 
-  alias Dobro.Infra.Data.Query.{Spec, StrategyOpts}
+  alias Dobro.Infra.Data.Query.{Helpers, Spec, StrategyOpts}
   alias Dobro.Query.Facet
 
   def run(repo_module, %Spec{} = spec, args, context) do
     ecto_query = build_queryable(repo_module, spec, args, context)
-    strategy_opts = StrategyOpts.build(repo_module, context, spec)
+    strategy_opts = StrategyOpts.build(repo_module, context, spec, Helpers.owner(args))
 
     Facet.run(ecto_query, args, spec,
       repo: repo_module,

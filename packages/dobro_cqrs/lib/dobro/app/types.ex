@@ -45,7 +45,20 @@ defmodule Dobro.App.Types do
     field :direction, SortDirection, required: true
   end
 
+  defenum Owner do
+    description("Who owns a row, relative to the request")
+
+    value :global, description: "Global rows, shared by every tenant"
+
+    value :tenant,
+      description: "Tenants' rows: the request tenant's, or every tenant's when working globally"
+  end
+
   defcontract Query do
+    field :owner, list_of(Owner),
+      description:
+        "Rows to list by owner. Default: the tenant's and global rows inside a tenant; global rows when working globally"
+
     field :order, list_of(Sort)
     field :limit, :integer
     field :page, :integer

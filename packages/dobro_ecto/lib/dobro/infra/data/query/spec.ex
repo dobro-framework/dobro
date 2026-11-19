@@ -22,7 +22,7 @@ defmodule Dobro.Infra.Data.Query.Spec do
     count: :exact,
     preloads: [],
     enriches: [],
-    include_global: nil
+    owners: nil
   ]
 
   @type field_source ::
@@ -93,7 +93,7 @@ defmodule Dobro.Infra.Data.Query.Spec do
           count: :exact | :estimated | :skip,
           preloads: [preload()],
           enriches: [enrich()],
-          include_global: boolean() | nil
+          owners: [:tenant | :global] | nil
         }
 
   @doc """
@@ -111,7 +111,8 @@ defmodule Dobro.Infra.Data.Query.Spec do
   @doc """
   Returns joins required for `fields`, including transitive `through` dependencies, in definition order.
   """
-  def joins_for_fields(%__MODULE__{} = spec, fields) when is_list(fields) or is_struct(fields, MapSet) do
+  def joins_for_fields(%__MODULE__{} = spec, fields)
+      when is_list(fields) or is_struct(fields, MapSet) do
     needed =
       fields
       |> Enum.reduce(MapSet.new(), fn field, acc ->

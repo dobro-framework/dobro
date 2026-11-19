@@ -6,7 +6,12 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
   alias Dobro.Infra.Data.ReadRepo
 
   test "compiles query modules with specs" do
-    assert %Dobro.Infra.Data.Query.Spec{type: :one, preloads: preloads, joins: joins, fields: one_fields} =
+    assert %Dobro.Infra.Data.Query.Spec{
+             type: :one,
+             preloads: preloads,
+             joins: joins,
+             fields: one_fields
+           } =
              GetCategory.__spec__()
 
     assert is_list(preloads)
@@ -35,15 +40,15 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       tenant_strategy: nil
 
     defquery ListItems, type: :list do
-      field :id, filterable: true, sortable: true
-      field :name
-      field :identifier, filterable: false
+      field(:id, filterable: true, sortable: true)
+      field(:name)
+      field(:identifier, filterable: false)
 
       join :tenant, type: :left do
-        field :tenant_name, :name, sortable: true
+        field(:tenant_name, :name, sortable: true)
       end
 
-      field :value, filterable: false, sortable: false
+      field(:value, filterable: false, sortable: false)
     end
   end
 
@@ -72,7 +77,7 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       schema: Dobro.Ecto.Test.Schemas.CategorySchema,
       tenant_strategy: nil
 
-    defquery ItemExists, type: :exists
+    defquery(ItemExists, type: :exists)
   end
 
   test "allows defquery without a do block" do
@@ -93,14 +98,14 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       tenant_strategy: nil
 
     defquery GetCategoryFacetValues,
-             type: :facet,
-             as: :get_category_facet_values,
-             facets: [:name, :status] do
-      filterable [:status, :tenant_id]
+      type: :facet,
+      as: :get_category_facet_values,
+      facets: [:name, :status] do
+      filterable([:status, :tenant_id])
 
-      query fn _args, _ctx ->
+      query(fn _args, _ctx ->
         from(c in schema(), as: :category)
-      end
+      end)
     end
   end
 
@@ -142,12 +147,13 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       tenant_strategy: nil
 
     defquery GetItem, type: :one do
-      fields [:id, :name]
+      fields([:id, :name])
 
-      enrich :tenant,
+      enrich(:tenant,
         key: :id,
         into: :option,
         with: {Dobro.Infra.Data.Query.DefinitionTest.EnrichLoader, :load}
+      )
     end
   end
 
@@ -162,7 +168,6 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
            ] = EnrichRepo.GetItem.__spec__().enriches
   end
 
-
   defmodule AsOverridePort do
     use Dobro.Spec.Port
     @callback custom_list(map(), term()) :: {:ok, term()} | {:error, term()}
@@ -175,11 +180,11 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       tenant_strategy: nil
 
     defquery ListItems, type: :list, as: :custom_list do
-      fields [:id, :name]
+      fields([:id, :name])
     end
 
     defquery HiddenList, type: :list, as: false do
-      fields [:id]
+      fields([:id])
     end
   end
 
@@ -190,8 +195,8 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
   end
 
   test "reads query defaults from use ReadRepo options" do
-    assert ReadRepo.query_defaults(query_defaults: [include_global: false]) ==
-             [include_global: false]
+    assert ReadRepo.query_defaults(query_defaults: [owners: [:tenant]]) ==
+             [owners: [:tenant]]
 
     assert ReadRepo.query_defaults([]) == []
   end
@@ -208,24 +213,24 @@ defmodule Dobro.Infra.Data.Query.DefinitionTest do
       use Dobro.Infra.Data.ReadRepo,
         port: DefaultsTestPort,
         schema: Dobro.Ecto.Test.Schemas.CategorySchema,
-        query_defaults: [include_global: false]
+        query_defaults: [owners: [:tenant]]
 
       defquery DefaultQuery, type: :one do
-        fields [:id, :name, :identifier, :tenant_id]
+        fields([:id, :name, :identifier, :tenant_id])
       end
 
-      defquery OverrideQuery, type: :one, include_global: true do
-        fields [:id, :name, :identifier, :tenant_id]
+      defquery OverrideQuery, type: :one, owners: [:tenant, :global] do
+        fields([:id, :name, :identifier, :tenant_id])
       end
     end
 
     test "applies repo defaults to defquery specs" do
-      assert DefaultsTestRepo.__query_defaults__() == [include_global: false]
-      assert DefaultsTestRepo.DefaultQuery.__spec__().include_global == false
+      assert DefaultsTestRepo.__query_defaults__() == [owners: [:tenant]]
+      assert DefaultsTestRepo.DefaultQuery.__spec__().owners == [:tenant]
     end
 
     test "allows per-query override of repo defaults" do
-      assert DefaultsTestRepo.OverrideQuery.__spec__().include_global == true
+      assert DefaultsTestRepo.OverrideQuery.__spec__().owners == [:tenant, :global]
     end
   end
 end

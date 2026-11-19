@@ -31,7 +31,7 @@ defmodule Dobro.Infra.Data.Query.Definition do
 
         query fn args, _context ->
           from(c in schema(), as: :category)
-          |> maybe_apply_tenant(args[:tenant_id], include_global: true)
+          |> maybe_apply_tenant(args[:tenant_id])
         end
       end
 
@@ -50,7 +50,11 @@ defmodule Dobro.Infra.Data.Query.Definition do
   - `:binding` — override root Ecto binding (default: inferred from schema, e.g. `CategorySchema` → `:category`)
   - `:schema` — override schema when not set on `use ReadRepo`
   - `:id_field` — for `:one` queries, the args key used to look up the record (default: `:id`)
-  - `:include_global` — for `:one`, `:list`, `:exists`, and `:facet` queries with a tenant-id strategy, forwarded to the tenant filter
+  - `:owners` — with a tenant-id strategy, who can own the rows: `[:tenant, :global]` (default) or
+    `[:tenant]`. A lookup inside a tenant reads that tenant's rows and, with `:global`, global ones.
+    A list or facet returns the owners the request asks for in `query.owner` (`:tenant` is the
+    request tenant's rows, or every tenant's when working globally): by default the tenant's and
+    global rows inside a tenant, and only global rows when working globally
   - `:default_limit` — default page size for `:list` queries (default: `10`)
   - `:default_order` — default sort when the client omits `order_by`, e.g. `[asc: :id]`
   - `:count` — list total strategy: `:exact` (default), `:estimated` (Postgres planner rows), or `:skip`
@@ -146,7 +150,7 @@ defmodule Dobro.Infra.Data.Query.Definition do
         fun_ast ->
           quote do
             def unquote(query_fn)(args, context) do
-              (unquote(fun_ast)).(args, context)
+              unquote(fun_ast).(args, context)
             end
           end
       end

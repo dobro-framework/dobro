@@ -99,15 +99,22 @@ defmodule Dobro.Query do
     @doc """
     Conditionally applies tenant filtering to a query.
 
-    `%Dobro.App.Auth.GlobalContext{}` applies no tenant filter. A
-    `%Dobro.App.Auth.TenantContext{}` or integer id delegates to `apply_tenant/3`.
-    `include_global` is only read for a tenant: `true` includes rows whose
-    `tenant_id` is null, `false` keeps that tenant's rows only. Nil raises
+    `owner:` (a list of `:tenant` / `:global`) keeps the rows the request asks
+    for, relative to the request: inside a tenant, `:tenant` is that tenant's
+    rows; working globally, every tenant's. Without it,
+    `%Dobro.App.Auth.GlobalContext{}` applies no filter, and a
+    `%Dobro.App.Auth.TenantContext{}` or integer id delegates to `apply_tenant/3`
+    (`include_global`: `true` adds rows whose `tenant_id` is null). Nil raises
     `MissingTenantError`.
     """
     def maybe_apply_tenant(query, tenant, opts \\ [])
 
-    def maybe_apply_tenant(query, %Dobro.App.Auth.GlobalContext{}, _opts), do: query
+    def maybe_apply_tenant(query, %Dobro.App.Auth.GlobalContext{}, opts) do
+      case Keyword.get(opts, :owner) do
+        nil -> query
+        owner -> global_owner(query, normalize_owner(owner))
+      end
+    end
 
     def maybe_apply_tenant(query, %Dobro.App.Auth.TenantContext{id: id}, opts)
         when not is_nil(id) do
@@ -128,13 +135,21 @@ defmodule Dobro.Query do
     def apply_tenant(query, tenant_id, opts \\ [])
 
     def apply_tenant(query, tenant_id, opts) do
-      include_global = Keyword.get(opts, :include_global, true)
       key = Keyword.get(opts, :key, [])
 
-      if include_global and not is_nil(tenant_id) do
-        do_apply_tenant(query, tenant_id, key)
-      else
-        do_apply_tenant(query, tenant_id)
+      case Keyword.get(opts, :owner) do
+        nil ->
+          if Keyword.get(opts, :include_global, true) and not is_nil(tenant_id),
+            do: do_apply_tenant(query, tenant_id, key),
+            else: do_apply_tenant(query, tenant_id)
+
+        owner ->
+          case normalize_owner(owner) do
+            [:tenant, :global] -> do_apply_tenant(query, tenant_id, key)
+            [:tenant] -> do_apply_tenant(query, tenant_id)
+            [:global] -> where_global(query)
+            [] -> where_none(query)
+          end
       end
     end
 
@@ -146,6 +161,51 @@ defmodule Dobro.Query do
     end
 
     def apply_tenant!(_, _, _), do: raise(MissingTenantError, message: "Tenant is required")
+
+    @doc """
+    Normalises a requested owner list (atoms, or strings from an API) to a
+    sorted subset of `[:tenant, :global]`. Nil or empty is nil: the default.
+    """
+    def normalize_owner(nil), do: nil
+    def normalize_owner([]), do: nil
+
+    def normalize_owner(owner) when is_list(owner) do
+      wanted = Enum.map(owner, &owner_atom/1)
+      Enum.filter([:tenant, :global], &(&1 in wanted))
+    end
+
+    defp owner_atom(value) when value in [:tenant, :global], do: value
+
+    defp owner_atom(value) when is_binary(value) do
+      case String.downcase(value) do
+        "tenant" -> :tenant
+        "global" -> :global
+        _ -> nil
+      end
+    end
+
+    defp owner_atom(_value), do: nil
+
+    # Working globally: `:tenant` is every tenant's rows.
+    defp global_owner(query, [:tenant, :global]), do: query
+    defp global_owner(query, [:global]), do: where_global(query)
+
+    defp global_owner(query, [:tenant]) do
+      import Ecto.Query, only: [where: 3]
+      where(query, [row], not is_nil(field(row, :tenant_id)))
+    end
+
+    defp global_owner(query, _none), do: where_none(query)
+
+    defp where_global(query) do
+      import Ecto.Query, only: [where: 3]
+      where(query, [row], is_nil(field(row, :tenant_id)))
+    end
+
+    defp where_none(query) do
+      import Ecto.Query, only: [where: 2]
+      where(query, false)
+    end
 
     defp do_apply_tenant(query, tenant_id) do
       Dobro.Query.where_eq(query, :tenant_id, tenant_id)

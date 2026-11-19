@@ -15,8 +15,8 @@ defmodule Dobro.Infra.Data.ReadRepo do
     alias Dobro.App.Selection
 
     typedstruct do
-      field :tenant, TenantContext.t()
-      field :selection, Selection.t()
+      field(:tenant, TenantContext.t())
+      field(:selection, Selection.t())
     end
 
     def new(attrs) do
@@ -34,7 +34,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
     {schema_quote, definition_opts} =
       case Keyword.get(opts, :schema) do
         nil ->
-          {quote(do: @read_repo_schema nil), opts}
+          {quote(do: @read_repo_schema(nil)), opts}
 
         schema ->
           schema_module = Macro.expand(schema, __CALLER__)
@@ -42,7 +42,8 @@ defmodule Dobro.Infra.Data.ReadRepo do
           Module.register_attribute(caller, :read_repo_schema, persist: true)
           Module.put_attribute(caller, :read_repo_schema, schema_module)
 
-          {quote(do: @read_repo_schema unquote(schema_module)), Keyword.put(opts, :schema, schema_module)}
+          {quote(do: @read_repo_schema(unquote(schema_module))),
+           Keyword.put(opts, :schema, schema_module)}
       end
 
     opts =
@@ -86,7 +87,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
   @doc """
   Returns query defaults from `use ReadRepo` options.
 
-  Set via `query_defaults: [include_global: false]` (overridable per `defquery`).
+  Set via `query_defaults: [owners: [:tenant]]` (overridable per `defquery`).
   """
   def query_defaults(opts), do: Keyword.get(opts, :query_defaults, [])
 
@@ -269,7 +270,7 @@ defmodule Dobro.Infra.Data.ReadRepo do
 
       base
       |> Keyword.merge(opts)
-      |> Keyword.take([:key, :include_global])
+      |> Keyword.take([:key, :include_global, :owner])
     end
 
     defp filter_tenant(queryable, schema_module, opts) do
@@ -277,8 +278,8 @@ defmodule Dobro.Infra.Data.ReadRepo do
       prepared = prepare_opts(schema_module, opts)
 
       case context.tenant do
-        %GlobalContext{} ->
-          queryable
+        %GlobalContext{} = tenant ->
+          Query.Tenant.maybe_apply_tenant(queryable, tenant, prepared)
 
         %TenantContext{id: id} when not is_nil(id) ->
           Query.Tenant.apply_tenant!(queryable, id, prepared)
