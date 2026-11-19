@@ -41,7 +41,12 @@ defmodule Dobro.Infra.Data.Query.One do
   defp build_queryable(%Spec{query: {mod, fun, 2}}, _repo_module, args, context),
     do: apply(mod, fun, [args, context])
 
-  defp build_queryable(%Spec{schema: schema, root_binding: binding}, _repo_module, _args, _context)
+  defp build_queryable(
+         %Spec{schema: schema, root_binding: binding},
+         _repo_module,
+         _args,
+         _context
+       )
        when not is_nil(binding) do
     from(s in schema, as: ^binding)
   end
@@ -57,10 +62,10 @@ defmodule Dobro.Infra.Data.Query.One do
 
     case spec.root_binding do
       binding when is_atom(binding) ->
-        from [{^binding, row}] in queryable, where: field(row, ^id_field) == ^id
+        from([{^binding, row}] in queryable, where: field(row, ^id_field) == ^id)
 
       _ ->
-        from row in queryable, where: field(row, ^id_field) == ^id
+        from(row in queryable, where: field(row, ^id_field) == ^id)
     end
   end
 

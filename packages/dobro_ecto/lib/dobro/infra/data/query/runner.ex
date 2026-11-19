@@ -62,4 +62,3 @@ defmodule Dobro.Infra.Data.Query.Runner do
     end
   end
 end
-
