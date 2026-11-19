@@ -636,20 +636,14 @@ MyApp.OfficeCommands.Handler.execute(command, context)
 
 ### Scope
 
-Commands and queries declare scope (`:global`, `:tenant`, or `:dynamic`). `Dobro.App.Scope.setup!/2` resolves scope against the execution context at handler runtime:
-
-```elixir
-# Declared on a command module
-scope :tenant, from: :context
-
-# Resolved in the handler pipeline
-scope_context = Scope.setup!(command.__scope__(), execution_context)
-#=> %ScopeContext{mode: :tenant, tenant: %TenantContext{...}}
-```
+A request runs in one scope: global (`%GlobalContext{}`) or one tenant
+(`%TenantContext{}`), set on its `ExecutionContext`. Commands and queries do
+not declare a scope or take a tenant in their payload; they act in the
+request's.
 
 ### ScopePolicy
 
-`Dobro.App.ScopePolicy.validate!/2` checks that a resolved scope is compatible with a read repository's allowed scopes and tenant strategy. Called automatically by query handlers — raise a clear error when, for example, a global-scoped query hits a schema-per-tenant repo.
+`Dobro.App.ScopePolicy.validate_context!/2` checks that a request's scope is one a read repository serves (its `scopes:`) and suits its tenant strategy. Called automatically by query handlers; it raises a clear error when, for example, a global request hits a schema-per-tenant repo.
 
 ### Selection
 

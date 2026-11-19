@@ -199,13 +199,8 @@ if Code.ensure_loaded?(Igniter) do
       end
     end
 
-    defp create_commands(igniter, meta, fields, tenant?) do
+    defp create_commands(igniter, meta, fields, _tenant?) do
       commands = Module.concat([meta.bc_module, App, :"#{meta.aggregate_name}Commands"])
-      scope_line =
-        if tenant?,
-          do: "    scope :tenant, from: :payload",
-          else: "    scope :global"
-
       input_fields =
         Enum.map_join(fields, "\n", fn {name, type} ->
           "    field :#{name}, #{inspect(type)}, required: true"
@@ -237,14 +232,12 @@ if Code.ensure_loaded?(Igniter) do
 
       command Create#{meta.aggregate_name} do
         description "Create a #{meta.singular}."
-      #{scope_line}
         payload Create#{meta.aggregate_name}Input
         result Create#{meta.aggregate_name}Result
       end
 
       command Update#{meta.aggregate_name} do
         description "Update a #{meta.singular}."
-      #{scope_line}
         identity do
           field :id, :id
         end
@@ -254,7 +247,6 @@ if Code.ensure_loaded?(Igniter) do
 
       command Delete#{meta.aggregate_name} do
         description "Delete a #{meta.singular}."
-      #{scope_line}
         identity do
           field :id, :id
         end
@@ -272,11 +264,6 @@ if Code.ensure_loaded?(Igniter) do
     defp create_queries(igniter, meta, fields, tenant?) do
       queries = Module.concat([meta.bc_module, App, :"#{meta.aggregate_name}Queries"])
       port = Module.concat([meta.bc_module, Ports, :"#{meta.aggregate_name}ReadRepo"])
-
-      scope_line =
-        if tenant?,
-          do: "    scope :tenant, from: :payload",
-          else: "    scope :global"
 
       result_fields =
         Enum.map_join(fields, "\n", fn {name, type} ->
@@ -318,7 +305,6 @@ if Code.ensure_loaded?(Igniter) do
 
       query Get#{meta.aggregate_name} do
         description "Fetch a #{meta.singular} by id."
-      #{scope_line}
         payload do
       #{tenant_payload}
           field :id, :id, required: true
@@ -328,7 +314,6 @@ if Code.ensure_loaded?(Igniter) do
 
       query List#{meta.list_name} do
         description "List #{meta.table}."
-      #{scope_line}
         payload do
       #{tenant_payload}
           field :query, Query

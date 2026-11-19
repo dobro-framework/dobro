@@ -25,9 +25,7 @@ defmodule Dobro.App.CommandHandler.MiddlewareTest do
   end
 
   defmodule Command do
-    defstruct [:payload, :identity, :scope]
-
-    def __scope__, do: {:tenant, :context}
+    defstruct [:payload, :identity]
   end
 
   defmodule InjectAuthorId do
@@ -81,8 +79,7 @@ defmodule Dobro.App.CommandHandler.MiddlewareTest do
   defp command do
     %Command{
       payload: %Payload{name: "Ada"},
-      identity: nil,
-      scope: {:tenant, :context}
+      identity: nil
     }
   end
 

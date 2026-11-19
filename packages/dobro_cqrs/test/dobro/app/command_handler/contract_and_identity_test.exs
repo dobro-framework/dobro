@@ -19,9 +19,7 @@ defmodule Dobro.App.CommandHandler.ContractAndIdentityTest do
   end
 
   defmodule Command do
-    defstruct [:payload, :identity, :scope]
-
-    def __scope__, do: {:tenant, :context}
+    defstruct [:payload, :identity]
   end
 
   defp ctx(tenant_id \\ 1) do
@@ -34,8 +32,7 @@ defmodule Dobro.App.CommandHandler.ContractAndIdentityTest do
   defp command(attrs \\ %{}) do
     %Command{
       payload: Map.get(attrs, :payload, %Payload{name: "Ada"}),
-      identity: Map.get(attrs, :identity),
-      scope: {:tenant, :context}
+      identity: Map.get(attrs, :identity)
     }
   end
 

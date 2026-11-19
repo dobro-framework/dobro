@@ -41,15 +41,11 @@ defmodule Dobro.App.QueryHandler do
     quote location: :keep do
       @behaviour Dobro.App.QueryHandler
 
-      Module.register_attribute(__MODULE__, :query_handles, accumulate: true)
-      @before_compile {Dobro.App.QueryHandler.Wiring, :__before_compile__}
 
       import Dobro.App.QueryHandler, only: [handle: 2, handle: 3, handle: 4]
       import Dobro.App.QueryHandler.Pipeline, except: [call: 3, call: 4]
       import Dobro.Pipeline, except: [finalize: 1, finalize: 2]
       alias Dobro.Pipeline
-
-      @query_handler_repo unquote(repo)
 
       unquote(repo_fun)
 
@@ -70,7 +66,6 @@ defmodule Dobro.App.QueryHandler do
 
   defmacro handle(query_module, repo_fn) do
     quote location: :keep do
-      @query_handles {unquote(query_module), unquote(repo_fn)}
 
       def execute(%unquote(query_module){} = query) do
         pipeline(query)

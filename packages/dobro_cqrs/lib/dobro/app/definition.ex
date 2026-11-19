@@ -13,7 +13,6 @@ defmodule Dobro.App.Definition do
 
       Module.register_attribute(unquote(mod), :namespace, accumulate: false)
       Module.put_attribute(unquote(mod), :namespace, unquote(namespace))
-      Module.register_attribute(unquote(mod), :scope, accumulate: false)
       Module.register_attribute(unquote(mod), :description, accumulate: false)
 
       @before_compile {unquote(__MODULE__), :__before_compile__}
@@ -32,28 +31,6 @@ defmodule Dobro.App.Definition do
       def __namespace__, do: @namespace
       def __description__, do: @description
       unquote(result_fn)
-    end
-  end
-
-  defmacro __add_scope_fn__(env) do
-    scope = Module.get_attribute(env.module, :scope)
-
-    quote do
-      def __scope__, do: unquote(scope)
-    end
-  end
-
-  def scope_value(:global, nil), do: {:global, nil}
-  def scope_value(:dynamic, nil), do: {:dynamic, nil}
-  def scope_value(:tenant, :payload), do: {:tenant, :payload}
-  def scope_value(:tenant, :context), do: {:tenant, :context}
-
-  def scope_value(scope_name, from),
-    do: raise("Invalid scope: #{inspect(scope_name)} with from: #{inspect(from)}")
-
-  defmacro scope(_scope_name, _opts \\ []) do
-    quote do
-      :ok
     end
   end
 

@@ -13,7 +13,6 @@ defmodule Dobro.App.QueryResultTest do
     end
 
     query GetItem do
-      scope :global
 
       payload do
         field :id, :id, required: true
@@ -23,13 +22,11 @@ defmodule Dobro.App.QueryResultTest do
     end
 
     query Flag do
-      scope :global
       payload do: nil
       result :boolean
     end
 
     query Untyped do
-      scope :global
       payload do: nil
     end
 

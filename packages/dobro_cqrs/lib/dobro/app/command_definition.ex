@@ -31,8 +31,6 @@ defmodule Dobro.App.CommandDefinition do
         import Dobro.App.CommandDefinition, only: [description: 1]
 
         unquote(block)
-
-        @before_compile {Dobro.App.Definition, :__add_scope_fn__}
       end
     end
   end

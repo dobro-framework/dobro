@@ -15,7 +15,6 @@ defmodule Dobro.App.Command do
 
       defstruct payload: %{},
                 identity: %{},
-                scope: nil,
                 message_identity: nil
 
       def new(%{} = args), do: Helpers.new(__MODULE__, args)

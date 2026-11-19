@@ -222,8 +222,6 @@ defmodule MyApp.Users.App.UserCommands do
   alias MyApp.Users.Domain.User
 
   command RegisterUser do
-    scope :tenant, from: :context
-
     payload do
       field :email, :string, required: true
       field :name, :string, required: true
@@ -247,14 +245,12 @@ defmodule MyApp.Users.App.UserQueries do
   alias MyApp.Ports.UserReadRepo
 
   query GetUser do
-    scope :tenant, from: :context
     payload do
       field :id, :id, required: true
     end
   end
 
   query ListUsers do
-    scope :tenant, from: :context
     payload do
       field :query, Query
     end

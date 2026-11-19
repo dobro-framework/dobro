@@ -35,7 +35,7 @@ defmodule Dobro.App.QueryHandler.Pipeline do
     |> setup_scope()
   end
 
-  @doc "Validates query scope and stores a `ScopeContext` on the pipeline config."
+  @doc "Resolves the request's context (a tenant, or global) onto the pipeline config."
   def setup_scope(%Pipeline{} = pipeline) do
     execution_context = Map.get(pipeline.config, :execution_context, %ExecutionContext{})
 

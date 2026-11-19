@@ -2,7 +2,8 @@ defmodule Dobro.App.QueryDefinition do
   @moduledoc """
   Macros for defining **application-layer** queries.
 
-  Use `query/2` to declare a use-case query struct (scope + payload).
+  Use `query/2` to declare a use-case query struct (its payload). A query runs
+  in the request's context: a tenant's, or global with no tenant.
   Use `query_handler/3` to wire queries to read repo functions.
 
   This is **not** where Ecto/SQL queries are defined — use `defquery` in a
@@ -11,9 +12,7 @@ defmodule Dobro.App.QueryDefinition do
   ## Example
 
       query ListCategories do
-        scope :global
         payload do
-          field :tenant_id, :id
           field :query, Dobro.App.Types.Query
         end
       end
@@ -46,7 +45,6 @@ defmodule Dobro.App.QueryDefinition do
         import Dobro.App.QueryDefinition, only: [description: 1]
 
         unquote(block)
-        @before_compile {Dobro.App.Definition, :__add_scope_fn__}
       end
     end
   end

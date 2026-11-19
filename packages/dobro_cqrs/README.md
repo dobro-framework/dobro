@@ -136,13 +136,10 @@ defmodule MyApp.Archive.App.CategoryCommands do
   end
 
   command CreateCategory do
-    scope :global
     payload CreateCategoryInput
   end
 
   command UpdateCategory do
-    scope :global
-
     identity do
       field :id, :id
     end
@@ -159,14 +156,11 @@ end
 
 ### Scope
 
-Every command and query declares a scope:
-
-| Scope | Declaration | Meaning |
-|-------|-------------|---------|
-| `:global` | `scope :global` | No tenant context required |
-| `:tenant` | `scope :tenant, from: :context` | Tenant from `ExecutionContext` |
-| `:tenant` | `scope :tenant, from: :payload` | Tenant ID on the command/query payload |
-| `:dynamic` | `scope :dynamic` | Global or tenant depending on context |
+A command or query runs in the request's scope: the tenant on its
+`ExecutionContext` (for HTTP, the request's tenant), or global when there is
+none. Commands and queries do not declare a scope, and never take a tenant in
+their payload. A read repo declares the scopes it serves
+(`scopes: [:global, :tenant]`), checked by `Dobro.App.ScopePolicy`.
 
 ### Identity
 
@@ -213,7 +207,7 @@ Command handlers connect commands to aggregate functions. They can be defined in
 ```
 Public API route
   → Command handler
-  → Scope setup
+  → Tenant resolution (the request's tenant, or global)
   → Contract casting
   → Specification checks (`if:`)
   → Identity resolution (if declared)
@@ -243,16 +237,12 @@ defmodule MyApp.Archive.App.CategoryQueries do
   alias MyApp.Archive.Ports.CategoryReadRepo
 
   query GetCategory do
-    scope :global
-
     payload do
       field :id, :id, required: true
     end
   end
 
   query ListCategories do
-    scope :global
-
     payload do
       field :tenant_id, :id
       field :query, Query
@@ -283,8 +273,6 @@ For paginated lists, include `Dobro.App.Types.Query` on the application query pa
 alias Dobro.App.Types.Query
 
 query ListCategories do
-  scope :global
-
   payload do
     field :tenant_id, :id          # application-level filter
     field :query, Query            # page, page_size, filters, order
@@ -310,8 +298,6 @@ Not every read goes through `defquery`. Read repos can expose plain functions fo
 ```elixir
 # Application query
 query OfficeExistsForTenant do
-  scope :tenant, from: :payload
-
   payload do
     field :tenant_id, :id, required: true
   end
@@ -349,8 +335,8 @@ end
 For `handle QueryModule, :repo_function`, the handler:
 
 1. Initialises a pipeline from the application query struct
-2. Resolves scope via `Dobro.App.Scope.setup_for_query!/2`
-3. Validates scope against the repo via `Dobro.App.ScopePolicy.validate!/2`
+2. Resolves the request's tenant (or global) from the `ExecutionContext`
+3. Checks the repo serves that scope via `Dobro.App.ScopePolicy.validate_context!/2`
 4. Converts the query payload to a DTO map
 5. Calls `CategoryReadRepo.adapter().repo_function(dto, context)` (or `/1` for global repos)
 6. Returns `{:ok, result}` or `{:error, errors}`
@@ -442,7 +428,6 @@ defmodule MyApp.Archive.App.CategoryQueries do
   end
 
   query GetCategory do
-    scope :global
     payload do
       field :id, :id, required: true
     end
@@ -451,7 +436,6 @@ defmodule MyApp.Archive.App.CategoryQueries do
   end
 
   query ListCategories do
-    scope :global
     payload do
       field :tenant_id, :id
       field :query, Query

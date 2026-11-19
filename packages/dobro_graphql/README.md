@@ -98,7 +98,7 @@ Mutations return a result type that includes both successful data and structured
 
 ### Tenant-scoped mutations
 
-When a command declares `scope :tenant, from: :payload`, the generated mutation input includes a required `tenant_id` field.
+A mutation acts in the request's tenant (from its `ExecutionContext`); inputs do not carry a tenant.
 
 ## Field selection
 
