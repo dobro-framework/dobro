@@ -71,7 +71,7 @@ defmodule Dobro.Infra.Data.WriteRepo do
     alias Dobro.App.Auth.TenantContext
 
     typedstruct do
-      field :tenant, TenantContext.t()
+      field(:tenant, TenantContext.t())
     end
 
     def new(attrs) do
@@ -98,8 +98,8 @@ defmodule Dobro.Infra.Data.WriteRepo do
     use TypedStruct
 
     typedstruct do
-      field :aggregate, term()
-      field :schema, term()
+      field(:aggregate, term())
+      field(:schema, term())
     end
 
     def new(attrs) do
@@ -123,16 +123,25 @@ defmodule Dobro.Infra.Data.WriteRepo do
     @moduledoc """
     Strategy for write repos that store a tenant id column — mirrors ReadRepo.TenantIdStrategy.
 
-    Stamps `tenant_id` onto the changeset from write context so domain aggregates
-    need not carry storage tenancy.
+    Each context writes only its own rows: a tenant context loads that tenant's
+    rows, and a global context loads only global rows (`tenant_id` nil), so a
+    tenant's row is changed only from inside that tenant. Reads are separate:
+    a global read context still lists every tenant's rows.
+
+    Stamps `tenant_id` onto a new row from write context so domain aggregates
+    need not carry storage tenancy. An existing row keeps its owner.
     """
 
     alias Dobro.App.Auth.{GlobalContext, TenantContext}
 
     def repo_opts(%Context{}), do: {:ok, []}
 
-    @doc "Restricts loads to the context tenant, so an id from another tenant is not found."
-    def scope(queryable, %Context{tenant: %GlobalContext{}}), do: {:ok, queryable}
+    @doc "Restricts loads to the context's own rows, so another owner's id is not found."
+    def scope(queryable, %Context{tenant: %GlobalContext{}}) do
+      import Ecto.Query, only: [where: 3]
+
+      {:ok, where(queryable, [row], is_nil(field(row, :tenant_id)))}
+    end
 
     def scope(queryable, %Context{tenant: %TenantContext{id: tenant_id}})
         when not is_nil(tenant_id) do
@@ -142,6 +151,14 @@ defmodule Dobro.Infra.Data.WriteRepo do
     end
 
     def scope(_queryable, %Context{}), do: {:error, missing_tenant()}
+
+    def apply_to_changeset(
+          %Ecto.Changeset{data: %{__meta__: %{state: :loaded}}} = changeset,
+          %Context{tenant: tenant}
+        )
+        when not is_nil(tenant) do
+      {:ok, keep_owner(changeset)}
+    end
 
     def apply_to_changeset(changeset, %Context{tenant: %GlobalContext{}}) do
       {:ok, stamp_tenant_id(changeset, nil)}
@@ -153,6 +170,12 @@ defmodule Dobro.Infra.Data.WriteRepo do
     end
 
     def apply_to_changeset(_changeset, %Context{}), do: {:error, missing_tenant()}
+
+    defp keep_owner(changeset) do
+      changeset
+      |> Ecto.Changeset.delete_change(:tenant_id)
+      |> clear_field_error(:tenant_id)
+    end
 
     defp stamp_tenant_id(changeset, tenant_id) do
       changeset
@@ -168,7 +191,9 @@ defmodule Dobro.Infra.Data.WriteRepo do
     end
 
     defp missing_tenant do
-      Error.new(:missing_tenant, description: "Tenant id is required for tenant_id write strategy")
+      Error.new(:missing_tenant,
+        description: "Tenant id is required for tenant_id write strategy"
+      )
     end
   end
 

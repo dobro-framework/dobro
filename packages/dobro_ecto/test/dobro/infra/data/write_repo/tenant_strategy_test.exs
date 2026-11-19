@@ -1,7 +1,7 @@
 defmodule Dobro.Infra.Data.WriteRepo.TenantStrategyTest do
   use ExUnit.Case, async: true
 
-  alias Dobro.App.Auth.TenantContext
+  alias Dobro.App.Auth.{GlobalContext, TenantContext}
   alias Dobro.Error
   alias Dobro.Infra.Data.WriteRepo
   alias Dobro.Infra.Data.WriteRepo.Context
@@ -18,9 +18,9 @@ defmodule Dobro.Infra.Data.WriteRepo.TenantStrategyTest do
     import Ecto.Changeset
 
     schema "items" do
-      field :name, :string
-      field :tenant_id, :integer
-      field :version, :integer, default: 0
+      field(:name, :string)
+      field(:tenant_id, :integer)
+      field(:version, :integer, default: 0)
     end
 
     def changeset(struct, attrs) do
@@ -79,6 +79,39 @@ defmodule Dobro.Infra.Data.WriteRepo.TenantStrategyTest do
     refute Keyword.has_key?(stamped.errors, :tenant_id)
   end
 
+  test "TenantIdStrategy stamps a new row as global in a global context" do
+    changeset = ItemSchema.changeset(%ItemSchema{}, %{name: "a", tenant_id: 9})
+    context = Context.new(tenant: GlobalContext.new())
+
+    assert {:ok, stamped} = WriteRepo.TenantIdStrategy.apply_to_changeset(changeset, context)
+    assert Ecto.Changeset.fetch_field!(stamped, :tenant_id) == nil
+  end
+
+  test "TenantIdStrategy keeps an existing row's owner in a global context" do
+    changeset =
+      %ItemSchema{id: 1, name: "a", tenant_id: 42}
+      |> Ecto.put_meta(state: :loaded)
+      |> ItemSchema.changeset(%{name: "b", tenant_id: nil})
+
+    context = Context.new(tenant: GlobalContext.new())
+
+    assert {:ok, saved} = WriteRepo.TenantIdStrategy.apply_to_changeset(changeset, context)
+    assert Ecto.Changeset.fetch_field!(saved, :tenant_id) == 42
+    assert Ecto.Changeset.get_change(saved, :name) == "b"
+  end
+
+  test "TenantIdStrategy keeps an existing global row global in a tenant context" do
+    changeset =
+      %ItemSchema{id: 1, name: "a", tenant_id: nil}
+      |> Ecto.put_meta(state: :loaded)
+      |> ItemSchema.changeset(%{name: "b"})
+
+    context = Context.new(tenant: TenantContext.new(%{id: 42, identifier: "acme"}))
+
+    assert {:ok, saved} = WriteRepo.TenantIdStrategy.apply_to_changeset(changeset, context)
+    assert Ecto.Changeset.fetch_field!(saved, :tenant_id) == nil
+  end
+
   test "TenantIdStrategy errors when tenant id is missing" do
     changeset = ItemSchema.changeset(%ItemSchema{}, %{name: "a"})
     context = Context.new(tenant: nil)
@@ -92,6 +125,15 @@ defmodule Dobro.Infra.Data.WriteRepo.TenantStrategyTest do
 
     assert {:ok, query} = WriteRepo.TenantIdStrategy.scope(ItemSchema, context)
     assert [%{expr: expr, params: [{42, _}]}] = query.wheres
+    assert Macro.to_string(expr) =~ "tenant_id"
+  end
+
+  test "TenantIdStrategy scopes loads in a global context to global rows" do
+    context = Context.new(tenant: GlobalContext.new())
+
+    assert {:ok, query} = WriteRepo.TenantIdStrategy.scope(ItemSchema, context)
+    assert [%{expr: expr, params: []}] = query.wheres
+    assert Macro.to_string(expr) =~ "is_nil"
     assert Macro.to_string(expr) =~ "tenant_id"
   end
 
